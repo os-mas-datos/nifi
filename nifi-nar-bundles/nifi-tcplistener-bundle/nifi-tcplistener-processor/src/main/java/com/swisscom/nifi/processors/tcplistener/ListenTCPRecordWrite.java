@@ -18,10 +18,7 @@ package com.swisscom.nifi.processors.tcplistener;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.nifi.annotation.behavior.InputRequirement;
-import org.apache.nifi.annotation.behavior.SupportsBatching;
-import org.apache.nifi.annotation.behavior.WritesAttribute;
-import org.apache.nifi.annotation.behavior.WritesAttributes;
+import org.apache.nifi.annotation.behavior.*;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
@@ -71,6 +68,7 @@ import static org.apache.nifi.processor.util.listen.ListenerProperties.NETWORK_I
 
 @SupportsBatching
 @InputRequirement(InputRequirement.Requirement.INPUT_ALLOWED)
+@TriggerWhenEmpty
 @Tags({"listen", "tcp", "record", "tls", "ssl"})
 @CapabilityDescription("Listens for incoming TCP connections and reads data from each connection using a configured record " +
         "reader, and writes the records to a flow file using a configured record writer. The type of record reader selected will " +
@@ -359,6 +357,9 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 }
             }
 
+        }else if (inFlowFile != null ) {
+            getLogger().warn("Input Flowfile is missing \"tcp.sender\" attribute, cannot be matched to a TCP socket. Ignoring");
+            session.remove(inFlowFile);
         }
 
 
@@ -414,9 +415,11 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     }
                 }
 
-                if (record == null) {
-                    getLogger().debug("No records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
-                    IOUtils.closeQuietly(socketRecordReader);
+                 if (record == null) {
+                     if (socketRecordReader.isClosed()){
+                        getLogger().debug("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
+                        IOUtils.closeQuietly(socketRecordReader);
+                    }
                     session.remove(flowFile);
                     return;
                 }
