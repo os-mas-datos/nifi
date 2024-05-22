@@ -334,13 +334,16 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             final SocketChannelRecordReader scrr;
             synchronized (socketReaders) {
                 scrr = this.findSocketRecordReader(senderChannel);
+                if (scrr == null) {
+                    getLogger().debug("sender channel " + senderChannel + " not found in " +
+                            socketReaders.stream().map(src -> src.getRemoteAddress().toString()).collect(Collectors.joining(",")));
+                }
             }
             if (scrr == null) {
-                getLogger().debug("sender channel " + senderChannel + " not found in " +
-                socketReaders.stream().map(src -> src.getRemoteAddress().toString()).collect(Collectors.joining(",")) );
                 session.transfer(inFlowFile, REL_FAILED_ANSWERS);
             } else {
                 final StopWatch stopWatch = new StopWatch(true);
+                getLogger().info("Sending FF " + inFlowFile.getAttribute("tcp.sender") + " to " + scrr.getRemoteAddress().toString());
                 try {
                     session.read(inFlowFile, inputStream -> {
                         scrr.writeAck(ByteBuffer.wrap(inputStream.readAllBytes()));
@@ -419,7 +422,9 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                      if (socketRecordReader.isClosed()){
                         getLogger().debug("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
                         IOUtils.closeQuietly(socketRecordReader);
-                    }
+                    } else {
+                         socketReaders.offer(socketRecordReader);
+                     }
                     session.remove(flowFile);
                     return;
                 }
@@ -505,12 +510,18 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
     }
 
-    private SocketChannelRecordReader findSocketRecordReader(String remoteAddress) {
+    private synchronized SocketChannelRecordReader findSocketRecordReader(String remoteAddress) {
         try {
-            return socketReaders.stream().filter(src -> src.getRemoteAddress().toString().equals(remoteAddress)).findFirst().get();
+            for (Iterator<SocketChannelRecordReader> iterator = socketReaders.iterator(); iterator.hasNext(); ) {
+                SocketChannelRecordReader socketChannelRecordReader = iterator.next();
+                if (socketChannelRecordReader.getRemoteAddress().toString().equals(remoteAddress)) { return socketChannelRecordReader; }
+            }
         } catch (NoSuchElementException e) {
+            getLogger().debug("Socket {} not found anymore:" + e.getMessage(), remoteAddress);
             return null;
         }
+        getLogger().debug("Socket {} not found anymore", remoteAddress);
+        return null;
     }
 
     private String getRemoteAddress(final SocketChannelRecordReader socketChannelRecordReader) {
