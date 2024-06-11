@@ -55,6 +55,7 @@ import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.nio.channels.InterruptedByTimeoutException;
 import java.nio.channels.ServerSocketChannel;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
@@ -326,6 +327,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
     }
 
+
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         FlowFile inFlowFile = session.get();
@@ -343,12 +345,18 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 session.transfer(inFlowFile, REL_FAILED_ANSWERS);
             } else {
                 final StopWatch stopWatch = new StopWatch(true);
+                final StringBuilder errStr = new StringBuilder();
                 getLogger().info("Sending FF " + inFlowFile.getAttribute("tcp.sender") + " to " + scrr.getRemoteAddress().toString());
                 try {
                     session.read(inFlowFile, inputStream -> {
-                        scrr.writeAck(ByteBuffer.wrap(inputStream.readAllBytes()));
-                            });
-
+                        try {
+                            scrr.writeAck(ByteBuffer.wrap(inputStream.readAllBytes()));
+                        } catch (java.nio.channels.ClosedChannelException e) {
+                            getLogger().debug("Sending Ack failed bcs {}", e.getMessage());
+                            errStr.append(e.getMessage());
+                        }
+                    });
+                    if (errStr.length() > 0) { throw new IOException(errStr.toString());}
                     session.getProvenanceReporter().send(inFlowFile, senderChannel, stopWatch.getElapsed(TimeUnit.MILLISECONDS));
                     session.remove(inFlowFile);
                     session.commitAsync();
@@ -401,15 +409,16 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     // throwable (starting with the current one) to see if its a SocketTimeoutException
                     Throwable cause = e;
                     while (cause != null) {
-                        if (cause instanceof SocketTimeoutException) {
+                        if (cause instanceof SocketTimeoutException || cause instanceof InterruptedByTimeoutException) {
                             timeout = true;
+                            getLogger().debug("Caught SocketTimeoutException {} " + cause, cause.getClass().getName());
                             break;
                         }
                         cause = cause.getCause();
                     }
 
                     if (timeout) {
-                        getLogger().debug("Timeout reading records, will try again later", e);
+                        getLogger().debug("Timeout reading records, will try again later: ", e.getCause().getMessage());
                         socketReaders.offer(socketRecordReader);
                         session.remove(flowFile);
                         return;
@@ -419,12 +428,12 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 }
 
                  if (record == null) {
-                     if (socketRecordReader.isClosed()){
+                     //if (socketRecordReader.isClosed()){
                         getLogger().debug("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
                         IOUtils.closeQuietly(socketRecordReader);
-                    } else {
+                    //} else {
                          socketReaders.offer(socketRecordReader);
-                     }
+                    // }
                     session.remove(flowFile);
                     return;
                 }
@@ -444,11 +453,14 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                         // handle a read failure according to the strategy selected...
                         // if discarding then bounce to the outer catch block which will close the connection and remove the flow file
                         // if keeping then null out the record to break out of the loop, which will transfer what we have and close the connection
+
                         try {
                             record = recordReader.nextRecord();
                         } catch (final SocketTimeoutException ste) {
                             getLogger().debug("Timeout reading records, will try again later", ste);
-                            break;
+                            socketReaders.offer(socketRecordReader);
+                            session.remove(flowFile);
+                            return;
                         } catch (final Exception e) {
                             if (ERROR_HANDLING_DISCARD.getValue().equals(readerErrorHandling)) {
                                 throw e;
@@ -457,9 +469,6 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                             }
                         }
 
-                        if (record != null) {
-                            writeResult = recordWriter.write(record);
-                        }
                     }
 
                     writeResult = recordWriter.finishRecordSet();

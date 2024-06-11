@@ -25,6 +25,7 @@ import org.apache.nifi.util.StringUtils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.SocketTimeoutException;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -68,8 +69,17 @@ public class StreamingRecordModelIteratorProvider implements RecordModelIterator
                         buffInputStr.mark(LOOKAHEAD_READLIMIT);
                         logger.debug("Decoded {} bytes into {}", new Object[]{decode, model.getClass()});
                     } catch (EOFException e) {
+                        logger.debug("EOF while reading {}", model.getClass());
+                        try {
+                            buffInputStr.close();
+                            inputStream.close();
+                        } catch (IOException ex) {
+                            throw new RuntimeException(ex);
+                        }
                         return false; // End hit because Stream closed
                     } catch (InterruptedIOException e){
+                        logger.debug("Interrupted while reading. re-throwing {} ", e.getClass());
+                        throw new RuntimeException( new SocketTimeoutException(e.getMessage()));
                                      // interrupted while blocking during read, normal behaviour
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to decode " + rootClass.getCanonicalName(), e);
