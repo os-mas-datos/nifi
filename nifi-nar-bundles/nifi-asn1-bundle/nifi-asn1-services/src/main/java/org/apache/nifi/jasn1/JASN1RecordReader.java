@@ -34,6 +34,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.concurrent.CompletionException;
 import java.util.function.Supplier;
 
 import static org.apache.nifi.jasn1.JASN1Utils.getSeqOfElementType;
@@ -126,25 +127,32 @@ public class JASN1RecordReader implements RecordReader {
     @Override
     public Record nextRecord(boolean coerceTypes, boolean dropUnknownFields) throws IOException, MalformedRecordException {
 
-        return withClassLoader(() -> {
-            if (recordModelIterator == null) {
-
-                final RecordModelIteratorProvider recordModelIteratorProvider;
-                try {
-                    recordModelIteratorProvider = iteratorProviderClass.getDeclaredConstructor().newInstance();
-                } catch (ReflectiveOperationException e) {
-                    throw new RuntimeException("Failed to instantiate " + iteratorProviderClass.getCanonicalName(), e);
+        try {
+            return withClassLoader(() -> {
+                if (recordModelIterator == null) {
+                    final RecordModelIteratorProvider recordModelIteratorProvider;
+                    try {
+                        recordModelIteratorProvider = iteratorProviderClass.getDeclaredConstructor().newInstance();
+                    } catch (ReflectiveOperationException e) {
+                        throw new RuntimeException("Failed to instantiate " + iteratorProviderClass.getCanonicalName(), e);
+                    }
+                    recordModelIterator = recordModelIteratorProvider.iterator(inputStream, logger, rootClass, recordField, seqOfField);
                 }
-
-                recordModelIterator = recordModelIteratorProvider.iterator(inputStream, logger, rootClass, recordField, seqOfField);
+                    if (recordModelIterator.hasNext()) {
+                        return convertBerRecord(recordModelIterator.next());
+                    } else {
+                        return null;
+                    }
+            });
+        } catch (CompletionException re) {
+            if (re.getCause() instanceof MalformedRecordException) {
+                throw (MalformedRecordException)re.getCause();
             }
-
-            if (recordModelIterator.hasNext()) {
-                return convertBerRecord(recordModelIterator.next());
-            } else {
-                return null;
+            if (re.getCause() instanceof IOException) {
+                throw (IOException) re.getCause();
             }
-        });
+            return null;
+        }
     }
 
     @SuppressWarnings("unchecked")
