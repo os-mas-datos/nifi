@@ -398,13 +398,14 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 if (recordReader == null) {
                     recordReader = socketRecordReader.createRecordReader(getLogger());
                 }
-
+                // Read the first record, mainly to determine the Schema
                 Record record;
                 try {
+                    getLogger().debug("Try blocking read of first record");
                     record = recordReader.nextRecord();
                 } catch (final Exception e) {
                     boolean timeout = false;
-
+                    getLogger().debug("Caught Exception {} with cause {} while reading first record", e.getClass().getName(), e.getCause().getClass().getName());
                     // some of the underlying record libraries wrap the real exception in RuntimeException, so check each
                     // throwable (starting with the current one) to see if its a SocketTimeoutException
                     Throwable cause = e;
@@ -423,6 +424,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                         session.remove(flowFile);
                         return;
                     } else {
+                        getLogger().debug("Could not find cause of Exception {}", e.getMessage());
                         throw e;
                     }
                 }
@@ -457,7 +459,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                         try {
                             record = recordReader.nextRecord();
                         } catch (final SocketTimeoutException ste) {
-                            getLogger().debug("Timeout reading records, will try again later", ste);
+                            getLogger().debug("Timeout reading records, will try again later");
                             socketReaders.offer(socketRecordReader);
                             session.remove(flowFile);
                             return;

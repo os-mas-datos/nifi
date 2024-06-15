@@ -81,6 +81,7 @@ public class StreamingRecordModelIteratorProvider implements RecordModelIterator
                         logger.debug("Interrupted while reading. re-throwing {} ", e.getClass());
                         throw new RuntimeException( new SocketTimeoutException(e.getMessage()));
                                      // interrupted while blocking during read, normal behaviour
+                                    // throwing a RuntimeException is wrong though, as it's intercepted by Framework and generates noise in the Log
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to decode " + rootClass.getCanonicalName(), e);
                     }
