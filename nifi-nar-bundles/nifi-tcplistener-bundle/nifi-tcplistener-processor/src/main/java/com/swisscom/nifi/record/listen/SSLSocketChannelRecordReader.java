@@ -83,8 +83,9 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
 
     @Override
     public int writeAck(ByteBuffer answer) throws IOException {
-        return this.socketChannel.write(answer);
-        // FIXME: This probably needs SL encryption too
+        int len = answer.array().length;
+        this.sslSocketChannel.write(answer.array());
+        return len;
     }
 
     @Override
