@@ -68,22 +68,26 @@ public class StreamingRecordModelIteratorProvider implements RecordModelIterator
                         lookahead.set(true);
                         buffInputStr.mark(LOOKAHEAD_READLIMIT);
                         logger.debug("Decoded {} bytes into {}", new Object[]{decode, model.getClass()});
-                    } catch (EOFException e) {
-                        logger.debug("EOF while reading {}", model.getClass());
-                        try {
-                            buffInputStr.close();
-                            inputStream.close();
-                        } catch (IOException ex) {
-                            throw new RuntimeException(ex);
-                        }
-                        return false; // End hit because Stream closed
                     } catch (InterruptedIOException e){
                         logger.debug("Interrupted while reading. re-throwing {} ", e.getClass());
                         throw new RuntimeException( new SocketTimeoutException(e.getMessage()));
                                      // interrupted while blocking during read, normal behaviour
                                     // throwing a RuntimeException is wrong though, as it's intercepted by Framework and generates noise in the Log
                     } catch (IOException e) {
-                        throw new RuntimeException("Failed to decode " + rootClass.getCanonicalName(), e);
+                        // the implemetation of SSL in NIFI  org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel
+                        // SSL can mask a EOFException in an javax.net.ssl.SSLException which is also a java.io.IOException
+                        if (e instanceof EOFException || e.getCause() instanceof EOFException) {
+                            logger.debug("EOF while reading {}", model.getClass());
+                            try {
+                                buffInputStr.close();
+                                inputStream.close();
+                            } catch (IOException ex) {
+                                throw new RuntimeException(ex);
+                            }
+                            return false; // End hit because Stream closed
+                        } else /* catch (IOException e) */ {
+                            throw new RuntimeException("Failed to decode " + rootClass.getCanonicalName(), e);
+                        }
                     }
                     try {
                         buffInputStr.reset();

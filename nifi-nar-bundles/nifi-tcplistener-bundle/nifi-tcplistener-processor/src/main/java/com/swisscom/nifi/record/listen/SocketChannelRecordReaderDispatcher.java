@@ -74,6 +74,8 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         while(!stopped) {
             try {
                 final SocketChannel socketChannel = serverSocketChannel.accept();
+                // if this channel is in non-blocking mode then this method will immediately return null if there are no pending connections.
+                // The socket channel returned by this method, if any, will be in blocking mode regardless of the blocking mode of this channel
                 if (socketChannel == null) {
                     Thread.sleep(20);
                     continue;

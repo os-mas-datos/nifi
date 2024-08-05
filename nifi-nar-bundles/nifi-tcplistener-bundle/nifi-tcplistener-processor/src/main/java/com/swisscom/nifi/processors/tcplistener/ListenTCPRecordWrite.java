@@ -50,10 +50,7 @@ import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
-import java.net.SocketTimeoutException;
+import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.InterruptedByTimeoutException;
 import java.nio.channels.ServerSocketChannel;
@@ -294,6 +291,8 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         // create a ServerSocketChannel in non-blocking mode and bind to the given address and port
         final ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
         serverSocketChannel.configureBlocking(false);
+        // Rebind to a Socket that is waiting for the remote side to terminate the previous connection
+        serverSocketChannel.setOption(StandardSocketOptions.SO_REUSEADDR, Boolean.TRUE);
         serverSocketChannel.bind(new InetSocketAddress(nicAddress, port));
 
         this.dispatcher = new SocketChannelRecordReaderDispatcher(serverSocketChannel, sslContext, clientAuth, readTimeout,
@@ -320,6 +319,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         SocketChannelRecordReader socketRecordReader;
         while ((socketRecordReader = socketReaders.poll()) != null) {
             try {
+                getLogger().debug("Socket Reader closing:"+socketRecordReader.getRemoteAddress());
                 socketRecordReader.close();
             } catch (Exception e) {
                 getLogger().error("Couldn't close " + socketRecordReader, e);
