@@ -19,6 +19,7 @@
         <groupId>org.apache.nifi</groupId>
         <version>1.23.2</version>
     </parent>
+    <version>1.23.2-2</version>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>nifi-asn1-bundle</artifactId>

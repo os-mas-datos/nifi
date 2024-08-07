@@ -1568,7 +1568,13 @@ language governing permissions and limitations under the License. -->
                 <dependency>
                     <groupId>org.apache.nifi</groupId>
                     <artifactId>nifi-asn1-nar</artifactId>
-                    <version>1.23.2</version>
+                    <version>1.23.2-2</version>
+                    <type>nar</type>
+                </dependency>
+                <dependency>
+                    <groupId>com.swisscom</groupId>
+                    <artifactId>nifi-tcplistener-processor-nar</artifactId>
+                    <version>1.0.3</version>
                     <type>nar</type>
                 </dependency>
             </dependencies>

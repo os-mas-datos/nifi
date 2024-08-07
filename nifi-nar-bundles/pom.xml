@@ -83,6 +83,7 @@
         <module>nifi-groovyx-bundle</module>
         <module>nifi-websocket-bundle</module>
         <module>nifi-tcp-bundle</module>
+        <module>nifi-tcplistener-bundle</module>
         <module>nifi-gcp-bundle</module>
         <module>nifi-registry-bundle</module>
         <module>nifi-stateful-analysis-bundle</module>
