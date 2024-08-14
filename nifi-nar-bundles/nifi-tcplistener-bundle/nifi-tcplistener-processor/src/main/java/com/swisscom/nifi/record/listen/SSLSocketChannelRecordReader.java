@@ -23,6 +23,8 @@ import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
@@ -38,7 +40,7 @@ import java.util.Collections;
  * Encapsulates an SSLSocketChannel and a RecordReader created for the given channel.
  */
 public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(SSLSocketChannel.class);
     private final SocketChannel socketChannel;
     private final SSLSocketChannel sslSocketChannel;
     private final RecordReaderFactory readerFactory;
@@ -78,7 +80,56 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
 
     @Override
     public SocketAddress getRemoteAddress() {
+        try {
+            LOGGER.debug("getRemoteAddress(socketChannel {} ) = isBlocking {} isConnected {} isOpen {} isConnectionPending {} localAddress {} remoteAddress {}",
+                    socketChannel.getClass().toString(),
+                    Boolean.toString(socketChannel.isBlocking()),
+                    Boolean.toString(socketChannel.isConnected()),
+                    Boolean.toString(socketChannel.isOpen()),
+                    Boolean.toString(socketChannel.isConnectionPending()),
+                    socketChannel.getLocalAddress(),
+                    socketChannel.getRemoteAddress()
+                    );
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        LOGGER.debug("getRemoteAddress(socketChannel.socket {} ) = isBound {} isConnected {} isClosed {} localAddress {} remoteAddress {}",
+                socketChannel.socket().getClass().toString(),
+                Boolean.toString(socketChannel.socket().isBound()),
+                Boolean.toString(socketChannel.socket().isClosed()),
+                Boolean.toString(socketChannel.socket().isConnected()),
+                socketChannel.socket().getInetAddress().toString(),
+                socketChannel.socket().getRemoteSocketAddress().toString()
+        );
+        LOGGER.debug("getRemoteAddress(sslSocketChannel {} ) = isClosed {}",
+                sslSocketChannel.getClass().toString(),
+                Boolean.toString(sslSocketChannel.isClosed())
+        );
+        if (socketChannel.socket().getRemoteSocketAddress() == null ){
+            LOGGER.debug("getRemoteAddress == null : Trying to connect socketChannel.socket().");
+            try {
+                sslSocketChannel.connect();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            if (socketChannel.socket().getRemoteSocketAddress() == null ){
+                LOGGER.debug("getRemoteAddress is still null");
+            }
+        }
         return socketChannel.socket().getRemoteSocketAddress();
+    }
+    // @TODO
+    private String remoteAddressString = "unset";
+    public String getRemoteAddressString() {
+        if (! remoteAddressString.equals(getRemoteAddress().toString())){
+            LOGGER.warn("getRemoteAddressString {} unlike reported value: {}", remoteAddressString, getRemoteAddress().toString());
+        }
+        return remoteAddressString;
+    }
+
+    public void setRemoteAddressString(String remoteAddressString) {
+        this.remoteAddressString
+                = remoteAddressString;
     }
 
     @Override

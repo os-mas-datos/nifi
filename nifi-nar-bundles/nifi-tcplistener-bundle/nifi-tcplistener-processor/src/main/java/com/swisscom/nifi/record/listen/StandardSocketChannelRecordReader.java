@@ -21,6 +21,8 @@ import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -34,6 +36,7 @@ import java.util.Collections;
  * Encapsulates a SocketChannel and a RecordReader created for the given channel.
  */
 public class StandardSocketChannelRecordReader implements SocketChannelRecordReader {
+    private static final Logger LOGGER = LoggerFactory.getLogger(StandardSocketChannelRecordReader.class);
 
     private final SocketChannel socketChannel;
     private final RecordReaderFactory readerFactory;
@@ -86,5 +89,18 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
         IOUtils.closeQuietly(recordReader);
         IOUtils.closeQuietly(socketChannel);
         dispatcher.connectionCompleted();
+    }
+    // @TODO
+    private String remoteAddressString = "unset";
+    public String getRemoteAddressString() {
+        if (! remoteAddressString.equals(getRemoteAddress().toString())){
+            LOGGER.warn("getRemoteAddressString {} unlike reported value: {}", remoteAddressString, getRemoteAddress().toString());
+        }
+        return remoteAddressString;
+    }
+
+    public void setRemoteAddressString(String remoteAddressString) {
+        remoteAddressString
+                = remoteAddressString;
     }
 }

@@ -51,6 +51,12 @@ public interface SocketChannelRecordReader extends Closeable {
      */
     SocketAddress getRemoteAddress();
 
+
+
+    String getRemoteAddressString();
+
+    void setRemoteAddressString(String remoteAddressString);
+
     int writeAck(ByteBuffer answer) throws IOException;
 
     /**

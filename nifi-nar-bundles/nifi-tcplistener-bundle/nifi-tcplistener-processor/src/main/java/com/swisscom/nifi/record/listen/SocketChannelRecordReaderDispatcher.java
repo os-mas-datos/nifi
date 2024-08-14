@@ -124,6 +124,9 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                     socketChannelRecordReader = new SSLSocketChannelRecordReader(socketChannel, sslSocketChannel, readerFactory, this, sslEngine);
                 }
 
+                // Manually set a String
+                socketChannelRecordReader.setRemoteAddressString( remoteSocketAddress == null ? "null" : remoteSocketAddress.toString());
+
                 // queue the SocketChannelRecordReader for processing by the processor
                 recordReaders.offer(socketChannelRecordReader);
 

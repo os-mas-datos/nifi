@@ -386,6 +386,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
+        final String senderAddress = socketRecordReader.getRemoteAddressString();
         final String readerErrorHandling = context.getProperty(READER_ERROR_HANDLING_STRATEGY).getValue();
         final RecordSetWriterFactory recordSetWriterFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
 
@@ -484,10 +485,14 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     session.remove(flowFile);
                 } else {
                     final String sender = getRemoteAddress(socketRecordReader);
+                    if (! sender.equals(senderAddress)) {
+                        getLogger().debug("current TCP.sender {} not equal to saved sender address {} stored on accept",
+                                sender, senderAddress);
+                    }
 
                     final Map<String, String> attributes = new HashMap<>(writeResult.getAttributes());
                     attributes.put(CoreAttributes.MIME_TYPE.key(), mimeType);
-                    attributes.put("tcp.sender", sender);
+                    attributes.put("tcp.sender", senderAddress);
                     attributes.put("tcp.port", String.valueOf(port));
                     attributes.put("record.count", String.valueOf(writeResult.getRecordCount()));
                     addClientCertificateAttributes(attributes, socketRecordReader);
