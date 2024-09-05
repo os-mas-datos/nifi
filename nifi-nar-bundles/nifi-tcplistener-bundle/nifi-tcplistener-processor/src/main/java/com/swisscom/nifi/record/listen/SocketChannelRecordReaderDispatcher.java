@@ -83,6 +83,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
                 socketChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
                 final SocketAddress remoteSocketAddress = socketChannel.getRemoteAddress();
+
                 socketChannel.socket().setSoTimeout(socketReadTimeout);
                 socketChannel.socket().setReceiveBufferSize(receiveBufferSize);
 
@@ -121,6 +122,8 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                     }
 
                     final SSLSocketChannel sslSocketChannel = new SSLSocketChannel(sslEngine, socketChannel);
+                    // the SSLSocketChannel constructor sets the blocking mode to false org/apache/nifi/remote/io/socket/ssl/SSLSocketChannel.java:120
+                    socketChannel.configureBlocking(true);
                     socketChannelRecordReader = new SSLSocketChannelRecordReader(socketChannel, sslSocketChannel, readerFactory, this, sslEngine);
                 }
 

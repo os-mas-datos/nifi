@@ -101,10 +101,14 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
                 socketChannel.socket().getInetAddress().toString(),
                 socketChannel.socket().getRemoteSocketAddress().toString()
         );
+        /*
         LOGGER.debug("getRemoteAddress(sslSocketChannel {} ) = isClosed {}",
                 sslSocketChannel.getClass().toString(),
-                Boolean.toString(sslSocketChannel.isClosed())
+                Boolean.toString(sslSocketChannel.isClosed()) // this causes a read ! if blocking, this'll time out
+                // org/apache/nifi/remote/io/socket/ssl/SSLSocketChannel.java:207
         );
+
+         */
         if (socketChannel.socket().getRemoteSocketAddress() == null ){
             LOGGER.debug("getRemoteAddress == null : Trying to connect socketChannel.socket().");
             try {
