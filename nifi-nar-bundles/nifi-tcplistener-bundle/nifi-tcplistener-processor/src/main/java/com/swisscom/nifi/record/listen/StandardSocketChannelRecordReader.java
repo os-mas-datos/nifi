@@ -43,6 +43,7 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
     private final SocketChannelRecordReaderDispatcher dispatcher;
 
     private RecordReader recordReader;
+    private String remoteAddressString = "unset";
 
     public StandardSocketChannelRecordReader(final SocketChannel socketChannel,
                                              final RecordReaderFactory readerFactory,
@@ -69,10 +70,6 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
         return recordReader;
     }
 
-    @Override
-    public SocketAddress getRemoteAddress() {
-        return socketChannel.socket().getRemoteSocketAddress();
-    }
 
     @Override
     public int writeAck(ByteBuffer answer) throws IOException {
@@ -90,17 +87,14 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
         IOUtils.closeQuietly(socketChannel);
         dispatcher.connectionCompleted();
     }
-    // @TODO
-    private String remoteAddressString = "unset";
+
+    @Override
     public String getRemoteAddressString() {
-        if (! remoteAddressString.equals(getRemoteAddress().toString())){
-            LOGGER.warn("getRemoteAddressString {} unlike reported value: {}", remoteAddressString, getRemoteAddress().toString());
-        }
         return remoteAddressString;
     }
 
     public void setRemoteAddressString(String remoteAddressString) {
-        remoteAddressString
+        this.remoteAddressString
                 = remoteAddressString;
     }
 }

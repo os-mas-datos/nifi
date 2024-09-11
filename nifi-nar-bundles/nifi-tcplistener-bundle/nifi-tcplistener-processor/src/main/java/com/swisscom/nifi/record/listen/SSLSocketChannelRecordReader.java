@@ -46,6 +46,7 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
     private final RecordReaderFactory readerFactory;
     private final SocketChannelRecordReaderDispatcher dispatcher;
     private final SSLEngine sslEngine;
+    private String remoteAddressString = "unset";
 
     private RecordReader recordReader;
 
@@ -79,55 +80,7 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
     }
 
     @Override
-    public SocketAddress getRemoteAddress() {
-        try {
-            LOGGER.debug("getRemoteAddress(socketChannel {} ) = isBlocking {} isConnected {} isOpen {} isConnectionPending {} localAddress {} remoteAddress {}",
-                    socketChannel.getClass().toString(),
-                    Boolean.toString(socketChannel.isBlocking()),
-                    Boolean.toString(socketChannel.isConnected()),
-                    Boolean.toString(socketChannel.isOpen()),
-                    Boolean.toString(socketChannel.isConnectionPending()),
-                    socketChannel.getLocalAddress(),
-                    socketChannel.getRemoteAddress()
-                    );
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        LOGGER.debug("getRemoteAddress(socketChannel.socket {} ) = isBound {} isConnected {} isClosed {} localAddress {} remoteAddress {}",
-                socketChannel.socket().getClass().toString(),
-                Boolean.toString(socketChannel.socket().isBound()),
-                Boolean.toString(socketChannel.socket().isClosed()),
-                Boolean.toString(socketChannel.socket().isConnected()),
-                socketChannel.socket().getInetAddress().toString(),
-                socketChannel.socket().getRemoteSocketAddress().toString()
-        );
-        /*
-        LOGGER.debug("getRemoteAddress(sslSocketChannel {} ) = isClosed {}",
-                sslSocketChannel.getClass().toString(),
-                Boolean.toString(sslSocketChannel.isClosed()) // this causes a read ! if blocking, this'll time out
-                // org/apache/nifi/remote/io/socket/ssl/SSLSocketChannel.java:207
-        );
-
-         */
-        if (socketChannel.socket().getRemoteSocketAddress() == null ){
-            LOGGER.debug("getRemoteAddress == null : Trying to connect socketChannel.socket().");
-            try {
-                sslSocketChannel.connect();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            if (socketChannel.socket().getRemoteSocketAddress() == null ){
-                LOGGER.debug("getRemoteAddress is still null");
-            }
-        }
-        return socketChannel.socket().getRemoteSocketAddress();
-    }
-    // @TODO
-    private String remoteAddressString = "unset";
     public String getRemoteAddressString() {
-        if (! remoteAddressString.equals(getRemoteAddress().toString())){
-            LOGGER.warn("getRemoteAddressString {} unlike reported value: {}", remoteAddressString, getRemoteAddress().toString());
-        }
         return remoteAddressString;
     }
 

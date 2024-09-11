@@ -49,9 +49,6 @@ public interface SocketChannelRecordReader extends Closeable {
     /**
      * @return the remote address of the underlying channel
      */
-    SocketAddress getRemoteAddress();
-
-
 
     String getRemoteAddressString();
 

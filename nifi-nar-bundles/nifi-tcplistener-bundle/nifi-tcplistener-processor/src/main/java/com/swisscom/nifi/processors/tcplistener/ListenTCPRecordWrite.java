@@ -319,7 +319,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         SocketChannelRecordReader socketRecordReader;
         while ((socketRecordReader = socketReaders.poll()) != null) {
             try {
-                getLogger().debug("Socket Reader closing:"+socketRecordReader.getRemoteAddress());
+                getLogger().debug("Socket Reader closing:"+this.getRemoteAddress(socketRecordReader));
                 socketRecordReader.close();
             } catch (Exception e) {
                 getLogger().error("Couldn't close " + socketRecordReader, e);
@@ -331,6 +331,10 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         FlowFile inFlowFile = session.get();
+        /*
+            in case there is a Flowfile on the input, look up the from which socket it (or a predecessor) was received
+            and send the content back to the sender address&port
+         */
         if (inFlowFile != null && inFlowFile.getAttribute("tcp.sender") != null && inFlowFile.getAttribute("tcp.sender") != "null") {
             String senderChannel = (String) inFlowFile.getAttribute("tcp.sender");
             final SocketChannelRecordReader scrr;
@@ -338,7 +342,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 scrr = this.findSocketRecordReader(senderChannel);
                 if (scrr == null) {
                     getLogger().debug("sender channel " + senderChannel + " not found in " +
-                            socketReaders.stream().map(src -> src.getRemoteAddress().toString()).collect(Collectors.joining(",")));
+                            socketReaders.stream().map(src -> this.getRemoteAddress(src)).collect(Collectors.joining(",")));
                 }
             }
             if (scrr == null) {
@@ -346,7 +350,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             } else {
                 final StopWatch stopWatch = new StopWatch(true);
                 final StringBuilder errStr = new StringBuilder();
-                getLogger().info("Sending FF " + inFlowFile.getAttribute("tcp.sender") + " to " + scrr.getRemoteAddress().toString());
+                getLogger().info("Sending FF " + inFlowFile.getAttribute("tcp.sender") + " to " + this.getRemoteAddress(scrr));
                 try {
                     session.read(inFlowFile, inputStream -> {
                         try {
@@ -373,6 +377,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             session.remove(inFlowFile);
         }
 
+        // Input section, poll for new data
 
         final SocketChannelRecordReader socketRecordReader = pollForSocketRecordReader();
         if (socketRecordReader == null) {
@@ -380,13 +385,13 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
         if (socketRecordReader.isClosed()) {
-            getLogger().warn("Unable to read records from {}, socket already closed", new Object[] {getRemoteAddress(socketRecordReader)});
+            getLogger().warn("Unable to read records from {}, socket already closed", new Object[] {this.getRemoteAddress(socketRecordReader)});
             IOUtils.closeQuietly(socketRecordReader); // still need to call close so the overall count is decremented
             return;
         }
 
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
-        final String senderAddress = socketRecordReader.getRemoteAddressString();
+        final String senderAddress = this.getRemoteAddress(socketRecordReader);
         final String readerErrorHandling = context.getProperty(READER_ERROR_HANDLING_STRATEGY).getValue();
         final RecordSetWriterFactory recordSetWriterFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
 
@@ -432,7 +437,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
 
                  if (record == null) {
                      //if (socketRecordReader.isClosed()){
-                        getLogger().debug("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
+                        getLogger().debug("No more records available from {}, closing connection", new Object[]{this.getRemoteAddress(socketRecordReader)});
                         IOUtils.closeQuietly(socketRecordReader);
                     //} else {
                          socketReaders.offer(socketRecordReader);
@@ -484,11 +489,6 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     getLogger().debug("Removing flow file, no records were written");
                     session.remove(flowFile);
                 } else {
-                    final String sender = getRemoteAddress(socketRecordReader);
-                    if (! sender.equals(senderAddress)) {
-                        getLogger().debug("current TCP.sender {} not equal to saved sender address {} stored on accept",
-                                sender, senderAddress);
-                    }
 
                     final Map<String, String> attributes = new HashMap<>(writeResult.getAttributes());
                     attributes.put(CoreAttributes.MIME_TYPE.key(), mimeType);
@@ -498,7 +498,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     addClientCertificateAttributes(attributes, socketRecordReader);
                     flowFile = session.putAllAttributes(flowFile, attributes);
 
-                    final String senderHost = sender.startsWith("/") && sender.length() > 1 ? sender.substring(1) : sender;
+                    final String senderHost = senderAddress.startsWith("/") && senderAddress.length() > 1 ? senderAddress.substring(1) : senderAddress;
                     final String transitUri = new StringBuilder().append("tcp").append("://").append(senderHost).append(":").append(port).toString();
                     session.getProvenanceReporter().receive(flowFile, transitUri);
 
@@ -530,7 +530,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         try {
             for (Iterator<SocketChannelRecordReader> iterator = socketReaders.iterator(); iterator.hasNext(); ) {
                 SocketChannelRecordReader socketChannelRecordReader = iterator.next();
-                if (socketChannelRecordReader.getRemoteAddress().toString().equals(remoteAddress)) { return socketChannelRecordReader; }
+                if (socketChannelRecordReader.getRemoteAddressString().equals(remoteAddress)) { return socketChannelRecordReader; }
             }
         } catch (NoSuchElementException e) {
             getLogger().debug("Socket {} not found anymore:" + e.getMessage(), remoteAddress);
@@ -541,7 +541,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     }
 
     private String getRemoteAddress(final SocketChannelRecordReader socketChannelRecordReader) {
-        return socketChannelRecordReader.getRemoteAddress() == null ? "null" : socketChannelRecordReader.getRemoteAddress().toString();
+        return socketChannelRecordReader.getRemoteAddressString() == null ? "null" : socketChannelRecordReader.getRemoteAddressString();
     }
 
     private void addClientCertificateAttributes(final Map<String, String> attributes, final SocketChannelRecordReader socketRecordReader)
@@ -558,7 +558,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 }
             } catch (SSLPeerUnverifiedException peerUnverifiedException) {
                 getLogger().debug("Remote Peer [{}] not verified: client certificates not provided",
-                        socketRecordReader.getRemoteAddress(), peerUnverifiedException);
+                        socketRecordReader.getRemoteAddressString(), peerUnverifiedException);
             }
         }
     }
