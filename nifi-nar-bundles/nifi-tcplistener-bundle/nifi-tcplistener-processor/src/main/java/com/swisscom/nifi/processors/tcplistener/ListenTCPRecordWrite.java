@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.nifi.processor.util.listen.ListenerProperties.NETWORK_INTF_NAME;
 
-@SupportsBatching
+@SupportsBatching(defaultDuration = DefaultRunDuration.ONE_HUNDRED_MILLIS )
 @InputRequirement(InputRequirement.Requirement.INPUT_ALLOWED)
 @TriggerWhenEmpty
 @Tags({"listen", "tcp", "record", "tls", "ssl"})

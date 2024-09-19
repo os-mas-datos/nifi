@@ -124,6 +124,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                     final SSLSocketChannel sslSocketChannel = new SSLSocketChannel(sslEngine, socketChannel);
                     // the SSLSocketChannel constructor sets the blocking mode to false org/apache/nifi/remote/io/socket/ssl/SSLSocketChannel.java:120
                     socketChannel.configureBlocking(true);
+                    sslSocketChannel.setTimeout(socketReadTimeout);
                     socketChannelRecordReader = new SSLSocketChannelRecordReader(socketChannel, sslSocketChannel, readerFactory, this, sslEngine);
                 }
 

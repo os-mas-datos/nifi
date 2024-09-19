@@ -24,7 +24,7 @@
 
     <groupId>com.swisscom</groupId>
     <artifactId>nifi-tcplistener-bundle</artifactId>
-    <version>1.0.4</version>
+    <version>1.0.4-timeout</version>
     <packaging>pom</packaging>
 
     <modules>
