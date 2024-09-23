@@ -23,6 +23,8 @@ import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
@@ -30,7 +32,6 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.Collections;
 
@@ -38,13 +39,14 @@ import java.util.Collections;
  * Encapsulates an SSLSocketChannel and a RecordReader created for the given channel.
  */
 public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(SSLSocketChannel.class);
     private final SocketChannel socketChannel;
     private final SSLSocketChannel sslSocketChannel;
     private final RecordReaderFactory readerFactory;
     private final SocketChannelRecordReaderDispatcher dispatcher;
     private final SSLEngine sslEngine;
-
+    private final SocketChannelAckWriter ackWriter;
+    private final String remoteAddress;
     private RecordReader recordReader;
 
     public SSLSocketChannelRecordReader(final SocketChannel socketChannel,
@@ -57,6 +59,15 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
         this.readerFactory = readerFactory;
         this.dispatcher = dispatcher;
         this.sslEngine = sslEngine;
+        this.ackWriter = new SSLSocketChannelAckWriter(sslSocketChannel);
+        String remoteAddress1;
+        try {
+            remoteAddress1 = socketChannel.getRemoteAddress().toString();
+        } catch (IOException e) {
+            LOGGER.warn("RemoteAddress can't be determined: {}", e.getMessage().toString());
+            remoteAddress1 = "";
+        }
+        this.remoteAddress = remoteAddress1;
     }
 
     @Override
@@ -66,6 +77,7 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
         }
 
         final InputStream socketIn = new SSLSocketChannelInputStream(sslSocketChannel);
+        // final BlockingQueue<Byte>
         final InputStream in = new BufferedInputStream(socketIn);
         recordReader = readerFactory.createRecordReader(Collections.emptyMap(), in, -1, logger);
         return recordReader;
@@ -82,15 +94,18 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
     }
 
     @Override
-    public int writeAck(ByteBuffer answer) throws IOException {
-        int len = answer.array().length;
-        this.sslSocketChannel.write(answer.array());
-        return len;
+    public SocketChannelAckWriter getWriter() {
+        return ackWriter;
     }
 
     @Override
     public boolean isClosed() {
         return sslSocketChannel.isClosed();
+    }
+
+    @Override
+    public String getRemoteAddressString() {
+        return this.remoteAddress;
     }
 
     @Override

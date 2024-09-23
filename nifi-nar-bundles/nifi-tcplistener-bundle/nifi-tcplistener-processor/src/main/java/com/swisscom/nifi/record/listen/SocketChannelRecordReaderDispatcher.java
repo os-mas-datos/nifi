@@ -21,10 +21,13 @@ import java.net.SocketAddress;
 import java.net.StandardSocketOptions;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+
+import org.apache.nifi.controller.queue.FlowFileQueue;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
 import org.apache.nifi.security.util.ClientAuth;
@@ -48,6 +51,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
     private final AtomicInteger currentConnections = new AtomicInteger(0);
 
     private volatile boolean stopped = false;
+    private Map<String,SocketChannelAckWriter> ackWriters;
 
     public SocketChannelRecordReaderDispatcher(final ServerSocketChannel serverSocketChannel,
                                                final SSLContext sslContext,
@@ -57,7 +61,9 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                                                final int maxConnections,
                                                final RecordReaderFactory readerFactory,
                                                final BlockingQueue<SocketChannelRecordReader> recordReaders,
-                                               final ComponentLog logger) {
+                                               final Map<String,SocketChannelAckWriter> ackWriters,
+                                               final ComponentLog logger
+    ) {
         this.serverSocketChannel = serverSocketChannel;
         this.sslContext = sslContext;
         this.clientAuth = clientAuth;
@@ -67,6 +73,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         this.readerFactory = readerFactory;
         this.recordReaders = recordReaders;
         this.logger = logger;
+        this.ackWriters = ackWriters;
     }
 
     @Override
@@ -126,6 +133,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
                 // queue the SocketChannelRecordReader for processing by the processor
                 recordReaders.offer(socketChannelRecordReader);
+                ackWriters.put(remoteSocketAddress.toString(),socketChannelRecordReader.getWriter());
 
             } catch (Exception e) {
                 logger.error("Error dispatching connection: " + e.getMessage(), e);

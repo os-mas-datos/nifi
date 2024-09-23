@@ -17,10 +17,13 @@
 package com.swisscom.nifi.record.listen;
 
 import org.apache.nifi.logging.ComponentLog;
+import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
 import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
 import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -34,19 +37,31 @@ import java.util.Collections;
  * Encapsulates a SocketChannel and a RecordReader created for the given channel.
  */
 public class StandardSocketChannelRecordReader implements SocketChannelRecordReader {
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(StandardSocketChannelRecordReader.class);
     private final SocketChannel socketChannel;
     private final RecordReaderFactory readerFactory;
     private final SocketChannelRecordReaderDispatcher dispatcher;
+    private final SocketChannelAckWriter ackWriter;
+    private final String remoteAddress;
 
     private RecordReader recordReader;
 
     public StandardSocketChannelRecordReader(final SocketChannel socketChannel,
                                              final RecordReaderFactory readerFactory,
                                              final SocketChannelRecordReaderDispatcher dispatcher) {
+
         this.socketChannel = socketChannel;
         this.readerFactory = readerFactory;
         this.dispatcher = dispatcher;
+        this.ackWriter = new StandardSocketChannelAckWriter(socketChannel);
+        String remoteAddress1;
+        try {
+            remoteAddress1 = socketChannel.getRemoteAddress().toString();
+        } catch (IOException e) {
+            LOGGER.warn("RemoteAddress can't be determined: {}", e.getMessage().toString());
+            remoteAddress1 = "";
+        }
+        this.remoteAddress = remoteAddress1;
     }
 
     @Override
@@ -72,6 +87,11 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
     }
 
     @Override
+    public SocketChannelAckWriter getWriter() {
+        return ackWriter;
+    }
+
+
     public int writeAck(ByteBuffer answer) throws IOException {
         return this.socketChannel.write(answer);
     }
@@ -79,6 +99,11 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
     @Override
     public boolean isClosed() {
         return !socketChannel.isOpen();
+    }
+
+    @Override
+    public String getRemoteAddressString() {
+        return this.remoteAddress;
     }
 
     @Override

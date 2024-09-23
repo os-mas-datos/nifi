@@ -16,6 +16,7 @@
  */
 package com.swisscom.nifi.processors.tcplistener;
 
+import com.swisscom.nifi.record.listen.SocketChannelAckWriter;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.annotation.behavior.*;
@@ -58,9 +59,11 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.nifi.processor.util.listen.ListenerProperties.NETWORK_INTF_NAME;
 
@@ -233,6 +236,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     private volatile int port;
     private volatile SocketChannelRecordReaderDispatcher dispatcher;
     private final BlockingQueue<SocketChannelRecordReader> socketReaders = new LinkedBlockingQueue<>();
+    private final Map<String, SocketChannelAckWriter> ackWriters = new ConcurrentHashMap<>();
 
     @Override
     public Set<Relationship> getRelationships() {
@@ -296,7 +300,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         serverSocketChannel.bind(new InetSocketAddress(nicAddress, port));
 
         this.dispatcher = new SocketChannelRecordReaderDispatcher(serverSocketChannel, sslContext, clientAuth, readTimeout,
-                maxSocketBufferSize, maxConnections, recordReaderFactory, socketReaders, getLogger());
+                maxSocketBufferSize, maxConnections, recordReaderFactory, socketReaders, ackWriters, getLogger());
 
         // start a thread to run the dispatcher
         final Thread readerThread = new Thread(dispatcher);
@@ -333,24 +337,24 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         FlowFile inFlowFile = session.get();
         if (inFlowFile != null && inFlowFile.getAttribute("tcp.sender") != null && inFlowFile.getAttribute("tcp.sender") != "null") {
             String senderChannel = (String) inFlowFile.getAttribute("tcp.sender");
-            final SocketChannelRecordReader scrr;
-            synchronized (socketReaders) {
-                scrr = this.findSocketRecordReader(senderChannel);
-                if (scrr == null) {
+            final SocketChannelAckWriter ackWriter;
+                ackWriter = this.findAckWriter(senderChannel);
+                if (ackWriter == null) {
                     getLogger().debug("sender channel " + senderChannel + " not found in " +
-                            socketReaders.stream().map(src -> src.getRemoteAddress().toString()).collect(Collectors.joining(",")));
+                            ackWriters.keySet().stream().collect(Collectors.joining(",","[","]")));
                 }
-            }
-            if (scrr == null) {
+
+            if (ackWriter == null) {
+                inFlowFile = session.putAttribute(inFlowFile, "failure.reason", "No open socketChannel found for sender");
                 session.transfer(inFlowFile, REL_FAILED_ANSWERS);
             } else {
                 final StopWatch stopWatch = new StopWatch(true);
                 final StringBuilder errStr = new StringBuilder();
-                getLogger().info("Sending FF " + inFlowFile.getAttribute("tcp.sender") + " to " + scrr.getRemoteAddress().toString());
+                getLogger().info(String.format("Sending FF ({} bytes) to {}", inFlowFile.getSize() ,inFlowFile.getAttribute("tcp.sender")));
                 try {
                     session.read(inFlowFile, inputStream -> {
                         try {
-                            scrr.writeAck(ByteBuffer.wrap(inputStream.readAllBytes()));
+                            ackWriter.writeAck(ByteBuffer.wrap(inputStream.readAllBytes()));
                         } catch (java.nio.channels.ClosedChannelException e) {
                             getLogger().debug("Sending Ack failed bcs {}", e.getMessage());
                             errStr.append(e.getMessage());
@@ -362,15 +366,17 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     session.commitAsync();
                 } catch (final Exception e) {
                     getLogger().error("Send Failed {}", inFlowFile, e);
+                    inFlowFile = session.putAttribute(inFlowFile, "failure.reason", e.getMessage());
                     session.transfer(session.penalize(inFlowFile), REL_FAILED_ANSWERS);
                     session.commitAsync();
                     context.yield();
                 }
             }
-
+            return;
         }else if (inFlowFile != null ) {
             getLogger().warn("Input Flowfile is missing \"tcp.sender\" attribute, cannot be matched to a TCP socket. Ignoring");
             session.remove(inFlowFile);
+            return;
         }
 
 
@@ -521,14 +527,11 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
     }
 
-    private synchronized SocketChannelRecordReader findSocketRecordReader(String remoteAddress) {
+    private synchronized SocketChannelAckWriter findAckWriter(String remoteAddress) {
         try {
-            for (Iterator<SocketChannelRecordReader> iterator = socketReaders.iterator(); iterator.hasNext(); ) {
-                SocketChannelRecordReader socketChannelRecordReader = iterator.next();
-                if (socketChannelRecordReader.getRemoteAddress().toString().equals(remoteAddress)) { return socketChannelRecordReader; }
-            }
-        } catch (NoSuchElementException e) {
-            getLogger().debug("Socket {} not found anymore:" + e.getMessage(), remoteAddress);
+            SocketChannelAckWriter result = ackWriters.get(remoteAddress);
+        } catch (NullPointerException e) {
+            getLogger().debug("Socket {} does not exist:" + e.getMessage(), remoteAddress);
             return null;
         }
         getLogger().debug("Socket {} not found anymore", remoteAddress);
@@ -536,7 +539,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     }
 
     private String getRemoteAddress(final SocketChannelRecordReader socketChannelRecordReader) {
-        return socketChannelRecordReader.getRemoteAddress() == null ? "null" : socketChannelRecordReader.getRemoteAddress().toString();
+        return socketChannelRecordReader.getRemoteAddressString() == null ? "null" : socketChannelRecordReader.getRemoteAddressString();
     }
 
     private void addClientCertificateAttributes(final Map<String, String> attributes, final SocketChannelRecordReader socketRecordReader)

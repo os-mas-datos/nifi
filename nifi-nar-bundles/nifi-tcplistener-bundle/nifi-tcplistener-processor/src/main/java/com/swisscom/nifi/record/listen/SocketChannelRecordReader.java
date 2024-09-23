@@ -51,11 +51,14 @@ public interface SocketChannelRecordReader extends Closeable {
      */
     SocketAddress getRemoteAddress();
 
-    int writeAck(ByteBuffer answer) throws IOException;
+
+
+    SocketChannelAckWriter getWriter();
 
     /**
      * @return true if the underlying channel is closed, false otherwise
      */
     boolean isClosed();
 
+    String getRemoteAddressString();
 }
