@@ -16,7 +16,7 @@
  */
 package com.swisscom.nifi.processors.tcplistener;
 
-import com.swisscom.nifi.record.listen.SocketChannelAckWriter;
+import com.swisscom.nifi.record.listen.*;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.annotation.behavior.*;
@@ -24,6 +24,7 @@ import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.annotation.lifecycle.OnStopped;
+import org.apache.nifi.annotation.lifecycle.OnUnscheduled;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.ValidationContext;
@@ -35,9 +36,6 @@ import org.apache.nifi.processor.*;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.processor.util.listen.ListenerProperties;
-import com.swisscom.nifi.record.listen.SSLSocketChannelRecordReader;
-import com.swisscom.nifi.record.listen.SocketChannelRecordReader;
-import com.swisscom.nifi.record.listen.SocketChannelRecordReaderDispatcher;
 import org.apache.nifi.security.util.ClientAuth;
 import org.apache.nifi.serialization.*;
 import org.apache.nifi.serialization.record.Record;
@@ -235,6 +233,8 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
 
     private volatile int port;
     private volatile SocketChannelRecordReaderDispatcher dispatcher;
+    // TODO: AckWriter
+
     private final BlockingQueue<SocketChannelRecordReader> socketReaders = new LinkedBlockingQueue<>();
     private final Map<String, SocketChannelAckWriter> ackWriters = new ConcurrentHashMap<>();
 
@@ -313,17 +313,26 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         return dispatcher.getPort();
     }
 
-    @OnStopped
-    public void onStopped() {
-        if (dispatcher != null) {
-            dispatcher.close();
-            dispatcher = null;
+    @OnUnscheduled
+    public void onUnscheduled(final ProcessContext context) {
+        getLogger().trace("Processor {} unscheduled", context.getName());
+        if (this.dispatcher != null) {
+            this.dispatcher.close(); // implies closing serverSocketChannel
+            getLogger().trace("Dispatcher closed");
+            this.dispatcher = null;  // dispatcher object and readerThread live on until last run completed and all socketReaders
+        } else {
+            getLogger().warn("Processor {} unscheduled, but no dispatcher found", context.getName());
         }
 
+    }
+
+    @OnStopped
+    public void onStopped() {
+        getLogger().trace("Processor stopping");
         SocketChannelRecordReader socketRecordReader;
         while ((socketRecordReader = socketReaders.poll()) != null) {
             try {
-                getLogger().debug("Socket Reader closing:"+socketRecordReader.getRemoteAddress());
+                getLogger().trace("Socket Reader {} closing:",socketRecordReader.getRemoteAddressString());
                 socketRecordReader.close();
             } catch (Exception e) {
                 getLogger().error("Couldn't close " + socketRecordReader, e);
@@ -386,9 +395,18 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
         if (socketRecordReader.isClosed()) {
-            getLogger().warn("Unable to read records from {}, socket already closed", new Object[] {getRemoteAddress(socketRecordReader)});
+            getLogger().debug("Unable to read records from {}, socket already closed", new Object[] {getRemoteAddress(socketRecordReader)});
             IOUtils.closeQuietly(socketRecordReader); // still need to call close so the overall count is decremented
             return;
+            // returning without offering the sockeReader back to the pool. #TODO: move this to after last read
+        }
+        // Check if Pipe is empty, then return
+        // #TODO: move into standard signature  / switch all reader to buffered
+        if (((BufferedChannelRecordReader)socketRecordReader).isIdle()){
+            socketReaders.offer(socketRecordReader);
+            return;
+        } else {
+            getLogger().trace("able to read records from {}, buffer not empty", new Object[] {getRemoteAddress(socketRecordReader)});
         }
 
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
@@ -407,7 +425,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 // Read the first record, mainly to determine the Schema
                 Record record;
                 try {
-                    getLogger().debug("Try blocking read of first record");
+                    getLogger().trace("Try blocking read of first record from: {}", socketRecordReader.getRemoteAddressString());
                     record = recordReader.nextRecord();
                 } catch (final Exception e) {
                     boolean timeout = false;
@@ -425,7 +443,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     }
 
                     if (timeout) {
-                        getLogger().debug("Timeout reading records, will try again later: ", e.getCause().getMessage());
+                        getLogger().trace("Timeout reading records from {}, will try again later: Msg {} ", socketRecordReader.getRemoteAddressString(),e.getCause().getMessage());
                         socketReaders.offer(socketRecordReader);
                         session.remove(flowFile);
                         return;
@@ -436,12 +454,13 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 }
 
                  if (record == null) {
-                     //if (socketRecordReader.isClosed()){
-                        getLogger().debug("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
+                     // #TODO: This check will fail with NIO, re-implement so that Listener set Close Flag upon receiving FIN
+                     if (socketRecordReader.isClosed()){
+                        getLogger().trace("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
                         IOUtils.closeQuietly(socketRecordReader);
-                    //} else {
+                    } else {
                          socketReaders.offer(socketRecordReader);
-                    // }
+                    }
                     session.remove(flowFile);
                     return;
                 }
@@ -465,7 +484,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                         try {
                             record = recordReader.nextRecord();
                         } catch (final SocketTimeoutException ste) {
-                            getLogger().debug("Timeout reading records, will try again later");
+                            getLogger().trace("Timeout reading records from {}, will try again later",socketRecordReader.getRemoteAddressString());
                             socketReaders.offer(socketRecordReader);
                             session.remove(flowFile);
                             return;
@@ -506,7 +525,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     session.transfer(flowFile, REL_SUCCESS);
                 }
 
-                getLogger().debug("Re-queuing connection for further processing...");
+                getLogger().trace("Re-queuing connection {} for further processing...", socketRecordReader.getRemoteAddressString());
                 socketReaders.offer(socketRecordReader);
 
             } catch (Exception e) {

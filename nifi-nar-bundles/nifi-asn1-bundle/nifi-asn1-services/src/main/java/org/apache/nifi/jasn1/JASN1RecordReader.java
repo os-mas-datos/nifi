@@ -93,7 +93,8 @@ public class JASN1RecordReader implements RecordReader {
 
         this.iteratorProviderClass = withClassLoader(() -> {
             if (StringUtils.isEmpty(iteratorProviderClassName)) {
-                return StreamingRecordModelIteratorProvider.class; // StandardRecordModelIteratorProvider.class;
+                // return StreamingRecordModelIteratorProvider.class;
+                return StandardRecordModelIteratorProvider.class;
             }
 
             try {
