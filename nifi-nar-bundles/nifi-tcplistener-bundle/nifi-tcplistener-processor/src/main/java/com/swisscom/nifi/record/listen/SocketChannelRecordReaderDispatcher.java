@@ -115,9 +115,12 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                 selector.keys().stream().forEach(key -> {
                     try {
                         this.logger.trace("Closing selector {}", new Object[]{key.attachment()});
+                        BufferedChannelRecordReader recordReader = (BufferedChannelRecordReader) key.attachment();
                         key.channel().close();
                         key.cancel();
-
+                        if (recordReader != null){
+                            recordReader.close();
+                        }
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -139,8 +142,12 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             }
             buffer.flip();
             channelRecordReader.receiverChannel().write(buffer);
+            byte[] b = new byte[r];
+            buffer.rewind();
+            buffer.get(b);
+            channelRecordReader.receiverOutputStream().write(b);
             buffer.clear();
-            logger.trace("Piped {} bytes, receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
+            logger.trace("Piped {} bytes",r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
 
         } while (r>0);
     }
@@ -170,7 +177,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             // create a StandardSocketChannelRecordReader or an SSLSocketChannelRecordReader based on presence of SSLContext
             final BufferedChannelRecordReader socketChannelRecordReader;
             if (sslContext == null) {
-                socketChannelRecordReader = new StandardBufferChannelRecordReader(socketChannel, readerFactory, this, remoteSocketAddress.toString());
+                socketChannelRecordReader = new StandardBufferChannelRecordReader(socketChannel, readerFactory, this, remoteSocketAddress.toString(), receiveBufferSize); // #TODO: place batch Size here, not ReceiveBuffer
             } else {
                 socketChannelRecordReader = null;
                 /* TODO: Reimplement Buffered/Piped
@@ -221,6 +228,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         selector.wakeup();
         try {
             this.serverSocketChannel.close();
+            logger.trace("Closed server socket channel");
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

@@ -1,5 +1,7 @@
 package com.swisscom.nifi.record.listen;
 
+import org.apache.commons.io.input.QueueInputStream;
+import org.apache.commons.io.output.QueueOutputStream;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.schema.access.SchemaNotFoundException;
 import org.apache.nifi.serialization.MalformedRecordException;
@@ -16,28 +18,61 @@ import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.time.Duration;
 import java.util.Collections;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
 
 public class StandardBufferChannelRecordReader implements BufferedChannelRecordReader{
     java.nio.channels.Pipe pipe;
     Pipe.SinkChannel sinkChannel;
-    BufferedInputStream inputStream;
+    public final BlockingQueue<Integer> queue;
+    final QueueInputStream inputQStream;
+    final QueueOutputStream outputQStream;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(StandardSocketChannelRecordReader.class);
+    public BufferedInputStream inputStream;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(StandardBufferChannelRecordReader.class);
     private final RecordReaderFactory readerFactory;
     private final SocketChannelRecordReaderDispatcher dispatcher;
     private final SocketChannelAckWriter ackWriter;
     private final String remoteAddress;
     private RecordReader recordReader;
+    private boolean closed = false;
 
-    public StandardBufferChannelRecordReader(final SocketChannel socketChannel, RecordReaderFactory readerFactory, SocketChannelRecordReaderDispatcher dispatcher, String remoteAddress) throws IOException {
+    public StandardBufferChannelRecordReader(final SocketChannel socketChannel, RecordReaderFactory readerFactory, SocketChannelRecordReaderDispatcher dispatcher, String remoteAddress, Integer recordBatchSize) throws IOException {
         this.readerFactory = readerFactory;
         this.dispatcher = dispatcher;
         this.ackWriter = null;
         this.remoteAddress = remoteAddress;
+
+        queue = new ArrayBlockingQueue<>(recordBatchSize);
+
+
+         inputQStream = QueueInputStream.builder().setBlockingQueue(queue).setTimeout(Duration.ZERO).get();
+         outputQStream = inputQStream.newQueueOutputStream();
         pipe = Pipe.open();
         sinkChannel = pipe.sink();
-        inputStream = new BufferedInputStream(Channels.newInputStream(pipe.source()));
+        /* inputStreams don't give away the remaining bytes to read, unless they are File-based.
+           However, some record readers, like ASN.1, base the decision whether to start reading another record
+           erronously on available().
+           here, we override the available() method and give away the size of the internal BlockingQueue between the
+           non-blocking SocketChannelDispatcher-reader thread and the blocking (ASN.1 or whatever)-record reader
+           since we have access to the underlying, manually constructet ArrayBlockingQueue.
+         */
+        inputStream = new BufferedInputStream(inputQStream){
+            @Override
+            public int available() throws IOException {
+                LOGGER.trace("{} avilable in Queue", queue.size());
+                if (queue.peek() != null) {
+                    return queue.size();
+                } else {
+                    return super.available(); // => 0
+                }
+            }
+        };
+        //inputStream = new BufferedInputStream(Channels.newInputStream(pipe.source()));
 
     }
 
@@ -47,18 +82,28 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     }
 
     @Override
+    public QueueOutputStream receiverOutputStream() {
+        return outputQStream;
+    }
+
+    @Override
     public boolean isIdle() {
+        return (queue.peek() == null );
+        /*
         try {
+
             inputStream.mark(2);
-            if (inputStream.read() < 0){
+            if (inputStream.read() < 0){ // this call will block - and lock at the same time
                 return true;
             } else {
                 inputStream.reset();
                 return false;
             }
+
         } catch (IOException e) {
             throw new RuntimeException("while checking buffer condition:" + e);
         }
+         */
     }
 
     @Override
@@ -89,7 +134,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
 
     @Override
     public boolean isClosed() {
-        return false;
+        return closed;
     }
 
     @Override
@@ -99,7 +144,10 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
 
     @Override
     public void close() {
+        this.closed = true;
+        IOUtils.closeQuietly(pipe.sink());
         IOUtils.closeQuietly(recordReader);
+        IOUtils.closeQuietly(pipe.source());
         dispatcher.connectionCompleted();
     }
 }

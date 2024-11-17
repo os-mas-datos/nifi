@@ -401,14 +401,15 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             // returning without offering the sockeReader back to the pool. #TODO: move this to after last read
         }
         // Check if Pipe is empty, then return
-        // #TODO: move into standard signature  / switch all reader to buffered
+        // # TODO: Rewqork, bcs isIdle is Blocking too, and then Locks
+        /*
         if (((BufferedChannelRecordReader)socketRecordReader).isIdle()){
             socketReaders.offer(socketRecordReader);
             return;
         } else {
             getLogger().trace("able to read records from {}, buffer not empty", new Object[] {getRemoteAddress(socketRecordReader)});
         }
-
+        */
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
         final String readerErrorHandling = context.getProperty(READER_ERROR_HANDLING_STRATEGY).getValue();
         final RecordSetWriterFactory recordSetWriterFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
@@ -426,6 +427,8 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 Record record;
                 try {
                     getLogger().trace("Try blocking read of first record from: {}", socketRecordReader.getRemoteAddressString());
+                    getLogger().trace("Queue fill: {} bytes", ((StandardBufferChannelRecordReader)socketRecordReader).queue);
+                    getLogger().trace("InputStream available: {} bytes", ((StandardBufferChannelRecordReader)socketRecordReader).inputStream.available());
                     record = recordReader.nextRecord();
                 } catch (final Exception e) {
                     boolean timeout = false;
@@ -453,7 +456,8 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     }
                 }
 
-                 if (record == null) {
+                if (record == null) {
+                    getLogger().trace("Record is null!");
                      // #TODO: This check will fail with NIO, re-implement so that Listener set Close Flag upon receiving FIN
                      if (socketRecordReader.isClosed()){
                         getLogger().trace("No more records available from {}, closing connection", new Object[]{getRemoteAddress(socketRecordReader)});
@@ -475,7 +479,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     // start the record set and write the first record from above
                     recordWriter.beginRecordSet();
                     writeResult = recordWriter.write(record);
-
+                    getLogger().trace("Write result {} record", writeResult.getRecordCount());
                     while (record != null && writeResult.getRecordCount() < recordBatchSize) {
                         // handle a read failure according to the strategy selected...
                         // if discarding then bounce to the outer catch block which will close the connection and remove the flow file
@@ -499,6 +503,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     }
 
                     writeResult = recordWriter.finishRecordSet();
+                    getLogger().trace("Write result {} records", writeResult.getRecordCount());
                     recordWriter.flush();
                     mimeType = recordWriter.getMimeType();
                 }
