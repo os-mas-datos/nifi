@@ -17,10 +17,16 @@
 package org.apache.nifi.record.listen;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.net.SocketAddress;
+import java.net.SocketOption;
 import java.net.StandardSocketOptions;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLContext;

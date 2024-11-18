@@ -93,10 +93,7 @@ public class SSLSocketChannelRecordReader implements SocketChannelRecordReader {
         return socketChannel.socket().getRemoteSocketAddress();
     }
 
-    @Override
-    public SocketChannelAckWriter getWriter() {
-        return ackWriter;
-    }
+
 
     @Override
     public boolean isClosed() {

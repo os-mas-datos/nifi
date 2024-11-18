@@ -14,17 +14,15 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketAddress;
-import java.nio.channels.Channels;
+import java.nio.ByteBuffer;
 import java.nio.channels.Pipe;
 import java.nio.channels.SocketChannel;
-import java.nio.channels.WritableByteChannel;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedTransferQueue;
 
-public class StandardBufferChannelRecordReader implements BufferedChannelRecordReader{
+public class StandardBufferChannelRecordReader implements BufferedChannelRecordReader, SocketChannelAckWriter{
     java.nio.channels.Pipe pipe;
     Pipe.SinkChannel sinkChannel;
     public final BlockingQueue<Integer> queue;
@@ -33,27 +31,28 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
 
     public BufferedInputStream inputStream;
 
+    private long lastBatchStart;
     private static final Logger LOGGER = LoggerFactory.getLogger(StandardBufferChannelRecordReader.class);
     private final RecordReaderFactory readerFactory;
     private final SocketChannelRecordReaderDispatcher dispatcher;
-    private final SocketChannelAckWriter ackWriter;
     private final String remoteAddress;
     private RecordReader recordReader;
     private boolean closed = false;
+    private final SocketChannel socketChannel;
 
     public StandardBufferChannelRecordReader(final SocketChannel socketChannel, RecordReaderFactory readerFactory, SocketChannelRecordReaderDispatcher dispatcher, String remoteAddress, Integer recordBatchSize) throws IOException {
         this.readerFactory = readerFactory;
         this.dispatcher = dispatcher;
-        this.ackWriter = null;
         this.remoteAddress = remoteAddress;
+        this.lastBatchStart = -1;
+        this.socketChannel = socketChannel;
 
         queue = new ArrayBlockingQueue<>(recordBatchSize);
 
 
          inputQStream = QueueInputStream.builder().setBlockingQueue(queue).setTimeout(Duration.ZERO).get();
          outputQStream = inputQStream.newQueueOutputStream();
-        pipe = Pipe.open();
-        sinkChannel = pipe.sink();
+
         /* inputStreams don't give away the remaining bytes to read, unless they are File-based.
            However, some record readers, like ASN.1, base the decision whether to start reading another record
            erronously on available().
@@ -77,10 +76,15 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     }
 
     @Override
-    public WritableByteChannel receiverChannel() {
-        return sinkChannel;
+    public void initNewBatch() {
+        this.lastBatchStart = System.currentTimeMillis();
     }
 
+    @Override
+    public long getBatchAge(){
+        if (lastBatchStart == -1L) { return -1L;}
+        return System.currentTimeMillis() - lastBatchStart;
+    }
     @Override
     public QueueOutputStream receiverOutputStream() {
         return outputQStream;
@@ -89,21 +93,6 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     @Override
     public boolean isIdle() {
         return (queue.peek() == null );
-        /*
-        try {
-
-            inputStream.mark(2);
-            if (inputStream.read() < 0){ // this call will block - and lock at the same time
-                return true;
-            } else {
-                inputStream.reset();
-                return false;
-            }
-
-        } catch (IOException e) {
-            throw new RuntimeException("while checking buffer condition:" + e);
-        }
-         */
     }
 
     @Override
@@ -127,10 +116,6 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
         return null;
     }
 
-    @Override
-    public SocketChannelAckWriter getWriter() {
-        return null;
-    }
 
     @Override
     public boolean isClosed() {
@@ -145,9 +130,17 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     @Override
     public void close() {
         this.closed = true;
-        IOUtils.closeQuietly(pipe.sink());
+        if (queue.size() > 0) {
+            LOGGER.trace("Queue with {} bytes from {} prematurely closed", queue.size(), this.remoteAddress);
+            queue.clear();
+        }
         IOUtils.closeQuietly(recordReader);
-        IOUtils.closeQuietly(pipe.source());
+        IOUtils.closeQuietly(socketChannel);
         dispatcher.connectionCompleted();
+    }
+
+    @Override
+    public int writeAck(ByteBuffer answer) throws IOException {
+        return this.socketChannel.write(answer);
     }
 }

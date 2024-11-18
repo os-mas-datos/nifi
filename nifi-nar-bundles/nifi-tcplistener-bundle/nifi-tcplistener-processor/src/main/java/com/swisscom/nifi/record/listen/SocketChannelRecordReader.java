@@ -53,8 +53,6 @@ public interface SocketChannelRecordReader extends Closeable {
 
 
 
-    SocketChannelAckWriter getWriter();
-
     /**
      * @return true if the underlying channel is closed, false otherwise
      */

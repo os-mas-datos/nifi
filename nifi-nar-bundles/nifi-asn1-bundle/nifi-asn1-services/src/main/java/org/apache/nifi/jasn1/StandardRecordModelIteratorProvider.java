@@ -89,7 +89,7 @@ public class StandardRecordModelIteratorProvider implements RecordModelIteratorP
 
         try {
             final int decode = model.decode(inputStream);
-            logger.debug("Decoded {} bytes into {}", new Object[]{decode, model.getClass()});
+            logger.trace("Decoded {} bytes into {}", new Object[]{decode, model.getClass()});
         } catch (IOException e) {
             throw new RuntimeException("Failed to decode " + rootClass.getCanonicalName(), e);
         }

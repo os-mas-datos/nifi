@@ -86,10 +86,7 @@ public class StandardSocketChannelRecordReader implements SocketChannelRecordRea
         return socketChannel.socket().getRemoteSocketAddress();
     }
 
-    @Override
-    public SocketChannelAckWriter getWriter() {
-        return ackWriter;
-    }
+
 
 
     public int writeAck(ByteBuffer answer) throws IOException {

@@ -235,7 +235,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     private volatile SocketChannelRecordReaderDispatcher dispatcher;
     // TODO: AckWriter
 
-    private final BlockingQueue<SocketChannelRecordReader> socketReaders = new LinkedBlockingQueue<>();
+    private final BlockingQueue<BufferedChannelRecordReader> socketReaders = new LinkedBlockingQueue<>();
     private final Map<String, SocketChannelAckWriter> ackWriters = new ConcurrentHashMap<>();
 
     @Override
@@ -348,18 +348,16 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             String senderChannel = (String) inFlowFile.getAttribute("tcp.sender");
             final SocketChannelAckWriter ackWriter;
                 ackWriter = this.findAckWriter(senderChannel);
-                if (ackWriter == null) {
-                    getLogger().debug("sender channel " + senderChannel + " not found in " +
-                            ackWriters.keySet().stream().collect(Collectors.joining(",","[","]")));
-                }
-
             if (ackWriter == null) {
+                getLogger().debug("sender channel " + senderChannel + " not found in " +
+                        ackWriters.keySet().stream().collect(Collectors.joining(",","[","]")));
+
                 inFlowFile = session.putAttribute(inFlowFile, "failure.reason", "No open socketChannel found for sender");
                 session.transfer(inFlowFile, REL_FAILED_ANSWERS);
             } else {
                 final StopWatch stopWatch = new StopWatch(true);
                 final StringBuilder errStr = new StringBuilder();
-                getLogger().info(String.format("Sending FF ({} bytes) to {}", inFlowFile.getSize() ,inFlowFile.getAttribute("tcp.sender")));
+                getLogger().trace("Sending FF ({} bytes) to {}", inFlowFile.getSize() ,inFlowFile.getAttribute("tcp.sender"));
                 try {
                     session.read(inFlowFile, inputStream -> {
                         try {
@@ -389,7 +387,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
 
-        final SocketChannelRecordReader socketRecordReader = pollForSocketRecordReader();
+        final BufferedChannelRecordReader socketRecordReader = pollForSocketRecordReader();
         if (socketRecordReader == null) {
             return;
         }
@@ -410,6 +408,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             getLogger().trace("able to read records from {}, buffer not empty", new Object[] {getRemoteAddress(socketRecordReader)});
         }
         */
+        socketRecordReader.initNewBatch();
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
         final String readerErrorHandling = context.getProperty(READER_ERROR_HANDLING_STRATEGY).getValue();
         final RecordSetWriterFactory recordSetWriterFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
@@ -542,24 +541,34 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
     }
 
-    private SocketChannelRecordReader pollForSocketRecordReader() {
+    private BufferedChannelRecordReader pollForSocketRecordReader() {
+        BufferedChannelRecordReader reader = null;
         try {
-            return socketReaders.poll(POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            reader = socketReaders.poll(POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            return reader;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
         }
     }
 
-    private synchronized SocketChannelAckWriter findAckWriter(String remoteAddress) {
+    private SocketChannelAckWriter findAckWriter(String remoteAddress) {
         try {
             SocketChannelAckWriter result = ackWriters.get(remoteAddress);
+            if (result == null) {
+                getLogger().debug("Return Socket to {} does not exist:", remoteAddress);
+                return null;
+            }
+            if (result.isClosed()){
+                getLogger().debug("Return Socket to  {} is closed", remoteAddress);
+                return null;
+            }
+            return result;
         } catch (NullPointerException e) {
-            getLogger().debug("Socket {} does not exist:" + e.getMessage(), remoteAddress);
+            getLogger().debug("Return Socket is not specified", remoteAddress);
             return null;
         }
-        getLogger().debug("Socket {} not found anymore", remoteAddress);
-        return null;
+
     }
 
     private String getRemoteAddress(final SocketChannelRecordReader socketChannelRecordReader) {

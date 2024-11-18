@@ -5,4 +5,5 @@ import java.nio.ByteBuffer;
 
 public interface SocketChannelAckWriter {
     public int writeAck(ByteBuffer answer) throws IOException;
+    public boolean isClosed();
 }

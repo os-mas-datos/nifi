@@ -28,11 +28,8 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
 
-import org.apache.nifi.controller.queue.FlowFileQueue;
 import org.apache.nifi.logging.ComponentLog;
-import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
 import org.apache.nifi.security.util.ClientAuth;
 import org.apache.nifi.serialization.RecordReaderFactory;
 
@@ -48,7 +45,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
     private final int receiveBufferSize;
     private final int maxConnections;
     private final RecordReaderFactory readerFactory;
-    private final BlockingQueue<SocketChannelRecordReader> recordReaders;
+    private final BlockingQueue<BufferedChannelRecordReader> recordReaders;
     private final ComponentLog logger;
 
     private final AtomicInteger currentConnections = new AtomicInteger(0);
@@ -63,7 +60,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                                                final int receiveBufferSize,
                                                final int maxConnections,
                                                final RecordReaderFactory readerFactory,
-                                               final BlockingQueue<SocketChannelRecordReader> recordReaders,
+                                               final BlockingQueue<BufferedChannelRecordReader> recordReaders,
                                                final Map<String,SocketChannelAckWriter> ackWriters,
                                                final ComponentLog logger
     ) {
@@ -103,7 +100,11 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                     if (key.isReadable()) {
                         BufferedChannelRecordReader recordReader = (BufferedChannelRecordReader) key.attachment();
                         logger.trace("Ready to read from {}", new Object[]{recordReader.getRemoteAddressString()});
-                        pipe(recordReader, key);
+                        try {
+                            pipe(recordReader, key);
+                        } catch (IOException e) {
+                            logger.debug("Failed to pipe data from {} to Reader: {}", new Object[]{recordReader.getRemoteAddressString(),e.getMessage()});
+                        }
                     }
                     iter.remove();
                 }
@@ -139,16 +140,14 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             r = client.read(buffer);
             if (r == -1) {
                 client.close();
+            } else {
+                buffer.flip();
+                byte[] b = new byte[r];
+                buffer.get(b);
+                channelRecordReader.receiverOutputStream().write(b);
+                buffer.clear();
+                logger.trace("Piped {} bytes", r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
             }
-            buffer.flip();
-            channelRecordReader.receiverChannel().write(buffer);
-            byte[] b = new byte[r];
-            buffer.rewind();
-            buffer.get(b);
-            channelRecordReader.receiverOutputStream().write(b);
-            buffer.clear();
-            logger.trace("Piped {} bytes",r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
-
         } while (r>0);
     }
 
@@ -171,7 +170,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
             if (logger.isDebugEnabled()) {
                 final String remoteAddress = remoteSocketAddress == null ? "null" : remoteSocketAddress.toString();
-                logger.debug("Accepted connection from {}", new Object[]{remoteAddress});
+                logger.trace("Accepted connection from {}", new Object[]{remoteAddress});
             }
 
             // create a StandardSocketChannelRecordReader or an SSLSocketChannelRecordReader based on presence of SSLContext
@@ -207,8 +206,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             // queue the SocketChannelRecordReader for processing by the processor
             recordReaders.offer(socketChannelRecordReader);
             if (remoteSocketAddress != null) {
-                // FIXME: remove ackwriter after close()
-                // ackWriters.put(remoteSocketAddress.toString(), socketChannelRecordReader.getWriter());
+                 ackWriters.put(remoteSocketAddress.toString(), socketChannelRecordReader);
             } else {
                 logger.warn("Accepted connection, but No remote socket address provided. No Keepalive responses possible");
             }
