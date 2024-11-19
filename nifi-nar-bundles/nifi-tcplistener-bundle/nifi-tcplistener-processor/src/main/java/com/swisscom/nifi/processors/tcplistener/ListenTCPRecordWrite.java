@@ -408,7 +408,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             getLogger().trace("able to read records from {}, buffer not empty", new Object[] {getRemoteAddress(socketRecordReader)});
         }
         */
-        socketRecordReader.initNewBatch();
+
         final int recordBatchSize = context.getProperty(RECORD_BATCH_SIZE).asInteger();
         final String readerErrorHandling = context.getProperty(READER_ERROR_HANDLING_STRATEGY).getValue();
         final RecordSetWriterFactory recordSetWriterFactory = context.getProperty(RECORD_WRITER).asControllerService(RecordSetWriterFactory.class);
@@ -467,7 +467,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     session.remove(flowFile);
                     return;
                 }
-
+                // First Record is read, but not yet written to a FlowFile
                 String mimeType = null;
                 WriteResult writeResult = null;
 
@@ -478,31 +478,39 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     // start the record set and write the first record from above
                     recordWriter.beginRecordSet();
                     writeResult = recordWriter.write(record);
-                    getLogger().trace("Write result {} record", writeResult.getRecordCount());
-                    while (record != null && writeResult.getRecordCount() < recordBatchSize) {
-                        // handle a read failure according to the strategy selected...
-                        // if discarding then bounce to the outer catch block which will close the connection and remove the flow file
-                        // if keeping then null out the record to break out of the loop, which will transfer what we have and close the connection
+                    getLogger().trace("Write result {} first record", writeResult.getRecordCount());
+                    if (socketRecordReader.getBatchAge() >= 0) {
+                        socketRecordReader.initNewBatch();
+                        record = recordReader.nextRecord();
+                        while (record != null && writeResult.getRecordCount() < recordBatchSize) {
+                            // handle a read failure according to the strategy selected...
+                            // if discarding then bounce to the outer catch block which will close the connection and remove the flow file
+                            // if keeping then null out the record to break out of the loop, which will transfer what we have and close the connection
 
-                        try {
-                            record = recordReader.nextRecord();
-                        } catch (final SocketTimeoutException ste) {
-                            getLogger().trace("Timeout reading records from {}, will try again later",socketRecordReader.getRemoteAddressString());
-                            socketReaders.offer(socketRecordReader);
-                            session.remove(flowFile);
-                            return;
-                        } catch (final Exception e) {
-                            if (ERROR_HANDLING_DISCARD.getValue().equals(readerErrorHandling)) {
-                                throw e;
-                            } else {
-                                record = null;
+                            try {
+                                writeResult = recordWriter.write(record);
+                                record = recordReader.nextRecord();
+                            } catch (final SocketTimeoutException ste) {
+                                getLogger().trace("Timeout reading records from {}, will try again later", socketRecordReader.getRemoteAddressString());
+                                socketReaders.offer(socketRecordReader);
+                                session.remove(flowFile);
+                                return;
+                            } catch (final Exception e) {
+                                if (ERROR_HANDLING_DISCARD.getValue().equals(readerErrorHandling)) {
+                                    throw e;
+                                } else {
+                                    record = null;
+                                }
                             }
-                        }
 
+                        }
+                    } else {
+                        // just init a new Batch marker and return with the first Packet (usually KeepAlive)
+                        socketRecordReader.initNewBatch();
                     }
 
                     writeResult = recordWriter.finishRecordSet();
-                    getLogger().trace("Write result {} records", writeResult.getRecordCount());
+                    getLogger().trace("Write result {} following records of same type", writeResult.getRecordCount());
                     recordWriter.flush();
                     mimeType = recordWriter.getMimeType();
                 }
