@@ -431,7 +431,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     record = recordReader.nextRecord();
                 } catch (final Exception e) {
                     boolean timeout = false;
-                    getLogger().debug("Caught Exception {} with cause {} while reading first record", e.getClass().getName(), e.getCause().getClass().getName());
+                    getLogger().debug("Caught Exception {} with cause {} while reading first record", e.getClass().getName(), e.getCause() == null ? "null" : e.getCause().getClass().getName());
                     // some of the underlying record libraries wrap the real exception in RuntimeException, so check each
                     // throwable (starting with the current one) to see if its a SocketTimeoutException
                     Throwable cause = e;
