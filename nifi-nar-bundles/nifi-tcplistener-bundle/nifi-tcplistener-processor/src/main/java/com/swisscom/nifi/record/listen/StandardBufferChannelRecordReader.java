@@ -67,7 +67,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
                 if (queue.peek() != null) {
                     return queue.size();
                 } else {
-                    return super.available(); // => 0
+                    return 0; // super.available(); // => 0
                 }
             }
         };
