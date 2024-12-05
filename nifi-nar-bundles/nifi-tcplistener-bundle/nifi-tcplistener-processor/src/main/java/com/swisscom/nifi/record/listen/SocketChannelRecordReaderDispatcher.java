@@ -28,8 +28,10 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
 
 import org.apache.nifi.logging.ComponentLog;
+import org.apache.nifi.remote.io.socket.ssl.SSLSocketChannel;
 import org.apache.nifi.security.util.ClientAuth;
 import org.apache.nifi.serialization.RecordReaderFactory;
 
@@ -99,11 +101,25 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
                     if (key.isReadable()) {
                         BufferedChannelRecordReader recordReader = (BufferedChannelRecordReader) key.attachment();
-                        logger.trace("Ready to read from {}", new Object[]{recordReader.getRemoteAddressString()});
-                        try {
-                            pipe(recordReader, key);
-                        } catch (IOException e) {
-                            logger.debug("Failed to pipe data from {} to Reader: {}", new Object[]{recordReader.getRemoteAddressString(),e.getMessage()});
+                        if (recordReader == null){
+                            key.cancel();
+                        } else {
+                            if (sslContext != null) {
+                                SSLBufferChannelRecordReader sslRecordReader = (SSLBufferChannelRecordReader) key.attachment();
+                                logger.trace("Ready to read SSL from {}", new Object[]{recordReader.getRemoteAddressString()});
+                                try {
+                                    pipeSSL(sslRecordReader);
+                                } catch (IOException e) {
+                                    logger.debug("Failed to pipe SSL data from {} to Reader: {}", new Object[]{recordReader.getRemoteAddressString(), e.getMessage()});
+                                }
+                        } else {
+                                logger.trace("Ready to read from {}", new Object[]{recordReader.getRemoteAddressString()});
+                                try {
+                                    pipe(recordReader, key);
+                                } catch (IOException e) {
+                                    logger.debug("Failed to pipe data from {} to Reader: {}", new Object[]{recordReader.getRemoteAddressString(), e.getMessage()});
+                                }
+                            }
                         }
                     }
                     iter.remove();
@@ -128,7 +144,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                 });
                 selector.close();
             } catch (IOException e) {
-                this.logger.warn("Failed to close selector. Msg: {}", e);
+                this.logger.warn("Failed to close selector upon stop. Msg: {}", e);
             }
         }
     }
@@ -140,12 +156,32 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             r = client.read(buffer);
             if (r == -1) {
                 client.close();
+                channelRecordReader.requestClose();
+                logger.trace("Closing selector {}", new Object[]{channelRecordReader.getRemoteAddressString()});
+                logger.trace("Request reader to also close after last message");
             } else {
                 buffer.flip();
                 byte[] b = new byte[r];
                 buffer.get(b);
                 channelRecordReader.receiverOutputStream().write(b);
                 buffer.clear();
+                logger.trace("Piped {} bytes", r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
+            }
+        } while (r>0);
+    }
+    private synchronized void pipeSSL(SSLBufferChannelRecordReader channelRecordReader) throws IOException {
+        byte[] buffer = new byte[1024];
+        SSLSocketChannel client = channelRecordReader.getSSLSocketChannel();
+        int r = 0;
+        do{
+            r = client.read(buffer);
+            if (r == -1) {
+                client.close();
+                channelRecordReader.requestClose();
+                logger.trace("Closing selector {}", new Object[]{channelRecordReader.getRemoteAddressString()});
+                logger.trace("Request reader to also close after last message");
+            } else if (r > 0) {
+                channelRecordReader.receiverOutputStream().write(buffer,0,r);
                 logger.trace("Piped {} bytes", r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
             }
         } while (r>0);
@@ -178,8 +214,8 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             if (sslContext == null) {
                 socketChannelRecordReader = new StandardBufferChannelRecordReader(socketChannel, readerFactory, this, remoteSocketAddress.toString(), receiveBufferSize); // #TODO: place batch Size here, not ReceiveBuffer
             } else {
-                socketChannelRecordReader = null;
-                /* TODO: Reimplement Buffered/Piped
+
+                /* TODO: Reimplement Buffered/Piped */
                 final SSLEngine sslEngine = sslContext.createSSLEngine();
                 sslEngine.setUseClientMode(false);
 
@@ -197,9 +233,9 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                 }
 
                 final SSLSocketChannel sslSocketChannel = new SSLSocketChannel(sslEngine, socketChannel);
-                socketChannelRecordReader = new SSLSocketChannelRecordReader(socketChannel, sslSocketChannel, readerFactory, this, sslEngine);
+                socketChannelRecordReader = new SSLBufferChannelRecordReader(socketChannel, sslSocketChannel, readerFactory, this,  remoteSocketAddress.toString(), receiveBufferSize);
 
-                 */
+
             }
             socketChannel.register(selector, SelectionKey.OP_READ,socketChannelRecordReader);
 

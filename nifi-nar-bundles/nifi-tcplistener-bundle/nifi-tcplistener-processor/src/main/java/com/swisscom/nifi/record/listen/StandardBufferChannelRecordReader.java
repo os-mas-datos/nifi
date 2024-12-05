@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.Pipe;
 import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.Collections;
@@ -23,8 +22,6 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
 public class StandardBufferChannelRecordReader implements BufferedChannelRecordReader, SocketChannelAckWriter{
-    java.nio.channels.Pipe pipe;
-    Pipe.SinkChannel sinkChannel;
     public final BlockingQueue<Integer> queue;
     final QueueInputStream inputQStream;
     final QueueOutputStream outputQStream;
@@ -39,6 +36,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     private RecordReader recordReader;
     private boolean closed = false;
     private final SocketChannel socketChannel;
+    private boolean closing;
 
     public StandardBufferChannelRecordReader(final SocketChannel socketChannel, RecordReaderFactory readerFactory, SocketChannelRecordReaderDispatcher dispatcher, String remoteAddress, Integer recordBatchSize) throws IOException {
         this.readerFactory = readerFactory;
@@ -46,6 +44,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
         this.remoteAddress = remoteAddress;
         this.lastBatchStart = -1;
         this.socketChannel = socketChannel;
+        this.closing = false;
 
         queue = new ArrayBlockingQueue<>(recordBatchSize);
 
@@ -67,6 +66,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
                 if (queue.peek() != null) {
                     return queue.size();
                 } else {
+                    if (closing) return -1;
                     return 0; // super.available(); // => 0
                 }
             }
@@ -116,9 +116,15 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
         return null;
     }
 
+    public void requestClose() {
+        closing = true;
+    };
 
     @Override
     public boolean isClosed() {
+        if (closing && isIdle()){
+            close();
+        }
         return closed;
     }
 

@@ -7,4 +7,5 @@ public interface BufferedChannelRecordReader extends SocketChannelRecordReader, 
 
     public org.apache.commons.io.output.QueueOutputStream receiverOutputStream();
     public boolean isIdle();
+    public void requestClose();
 }

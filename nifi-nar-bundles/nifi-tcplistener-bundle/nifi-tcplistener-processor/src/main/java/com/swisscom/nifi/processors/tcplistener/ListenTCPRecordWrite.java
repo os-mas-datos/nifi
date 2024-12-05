@@ -393,7 +393,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
         if (socketRecordReader.isClosed()) {
-            getLogger().debug("Unable to read records from {}, socket already closed", new Object[] {getRemoteAddress(socketRecordReader)});
+            getLogger().trace("Unable to read records from {}, socket reader already closed", new Object[] {getRemoteAddress(socketRecordReader)});
             IOUtils.closeQuietly(socketRecordReader); // still need to call close so the overall count is decremented
             return;
             // returning without offering the sockeReader back to the pool. #TODO: move this to after last read
@@ -517,7 +517,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
 
                 // if we didn't write any records then we need to remove the flow file
                 if (writeResult.getRecordCount() <= 0) {
-                    getLogger().debug("Removing flow file, no records were written");
+                    getLogger().trace("Removing flow file, no records were written");
                     session.remove(flowFile);
                 } else {
                     final String sender = getRemoteAddress(socketRecordReader);
@@ -597,7 +597,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                 }
             } catch (SSLPeerUnverifiedException peerUnverifiedException) {
                 getLogger().debug("Remote Peer [{}] not verified: client certificates not provided",
-                        socketRecordReader.getRemoteAddress(), peerUnverifiedException);
+                        socketRecordReader.getRemoteAddressString(), peerUnverifiedException);
             }
         }
     }
