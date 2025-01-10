@@ -19,7 +19,7 @@
     <parent>
         <groupId>com.swisscom</groupId>
         <artifactId>nifi-tcplistener-bundle</artifactId>
-        <version>1.2.0</version>
+        <version>1.2.1</version>
     </parent>
 
     <artifactId>nifi-tcplistener-processor</artifactId>
@@ -89,5 +89,11 @@
             <artifactId>nifi-record</artifactId>
             <scope>compile</scope>
         </dependency>
+        <!--<dependency>
+            <groupId>com.github.marianobarrios</groupId>
+            <artifactId>tls-channel</artifactId>
+            <version>0.9.1</version>
+            <scope>compile</scope>
+        </dependency> -->
     </dependencies>
 </project>
