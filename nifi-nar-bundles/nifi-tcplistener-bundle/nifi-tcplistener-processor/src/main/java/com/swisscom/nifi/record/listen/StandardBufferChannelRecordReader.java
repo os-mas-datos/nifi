@@ -37,6 +37,7 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     private boolean closed = false;
     private final SocketChannel socketChannel;
     private boolean closing;
+    private long lastReveiceTS=System.currentTimeMillis();
 
     public StandardBufferChannelRecordReader(final SocketChannel socketChannel, RecordReaderFactory readerFactory, SocketChannelRecordReaderDispatcher dispatcher, String remoteAddress, Integer recordBatchSize) throws IOException {
         this.readerFactory = readerFactory;
@@ -54,10 +55,10 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
 
         /* inputStreams don't give away the remaining bytes to read, unless they are File-based.
            However, some record readers, like ASN.1, base the decision whether to start reading another record
-           erronously on available().
+           erroneously on available().
            here, we override the available() method and give away the size of the internal BlockingQueue between the
            non-blocking SocketChannelDispatcher-reader thread and the blocking (ASN.1 or whatever)-record reader
-           since we have access to the underlying, manually constructet ArrayBlockingQueue.
+           since we have access to the underlying, manually constructed ArrayBlockingQueue.
          */
         inputStream = new BufferedInputStream(inputQStream){
             @Override
@@ -93,6 +94,17 @@ public class StandardBufferChannelRecordReader implements BufferedChannelRecordR
     @Override
     public boolean isIdle() {
         return (queue.peek() == null );
+    }
+
+    @Override
+    public long getReceiveAge() {
+
+        return System.currentTimeMillis() - this.lastReveiceTS;
+    }
+
+    @Override
+    public void resetReceiveTS() {
+        this.lastReveiceTS = System.currentTimeMillis();
     }
 
     @Override

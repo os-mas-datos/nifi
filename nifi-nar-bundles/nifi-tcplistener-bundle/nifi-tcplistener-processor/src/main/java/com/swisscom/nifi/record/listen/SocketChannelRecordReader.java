@@ -52,7 +52,6 @@ public interface SocketChannelRecordReader extends Closeable {
     SocketAddress getRemoteAddress();
 
 
-
     /**
      * @return true if the underlying channel is closed, false otherwise
      */

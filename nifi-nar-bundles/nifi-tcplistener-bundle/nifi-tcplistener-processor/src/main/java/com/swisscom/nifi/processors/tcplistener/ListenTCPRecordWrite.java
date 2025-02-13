@@ -113,7 +113,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
             .displayName("Read Timeout")
             .description("The amount of time to wait before timing out when reading from a connection.")
             .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
-            .defaultValue("10 seconds")
+            .defaultValue("120 seconds")
             .required(true)
             .build();
 
@@ -393,7 +393,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         }
 
         if (socketRecordReader.isClosed()) {
-            getLogger().trace("Unable to read records from {}, socket reader already closed", new Object[] {getRemoteAddress(socketRecordReader)});
+            getLogger().trace("Unable to read more records from {}, socket reader already closed", new Object[] {getRemoteAddress(socketRecordReader)});
             IOUtils.closeQuietly(socketRecordReader); // still need to call close so the overall count is decremented
             return;
             // returning without offering the sockeReader back to the pool. #TODO: move this to after last read

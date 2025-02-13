@@ -43,7 +43,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
     private final ServerSocketChannel serverSocketChannel;
     private final SSLContext sslContext;
     private final ClientAuth clientAuth;
-    private final int socketReadTimeout;
+    private final int recordReaderTimeout;
     private final int receiveBufferSize;
     private final int maxConnections;
     private final RecordReaderFactory readerFactory;
@@ -69,7 +69,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         this.serverSocketChannel = serverSocketChannel;
         this.sslContext = sslContext;
         this.clientAuth = clientAuth;
-        this.socketReadTimeout = socketReadTimeout;
+        this.recordReaderTimeout = socketReadTimeout;
         this.receiveBufferSize = receiveBufferSize;
         this.maxConnections = maxConnections;
         this.readerFactory = readerFactory;
@@ -100,6 +100,18 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                     }
 
                     if (key.isReadable()) {
+                        if (key.attachment() == null){
+                            // Reader wil only be created and attached upon first read, to avoid memory leaks
+                            // Attachments could also be disposed of, if they are lingering empty for too long.
+                            SocketChannel s = (SocketChannel) key.channel();
+                            if (s==null){
+                                // Warning about inability to create a reader already happened. Force close this connection
+                                // to let clients know.
+                                key.cancel(); // ignore on our side
+                                key.channel().close(); // pass close to client
+                            }
+                            key.attach(bindReader(s));
+                        }
                         BufferedChannelRecordReader recordReader = (BufferedChannelRecordReader) key.attachment();
                         if (recordReader == null){
                             key.cancel();
@@ -112,7 +124,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                                 } catch (IOException e) {
                                     logger.debug("Failed to pipe SSL data from {} to Reader: {}", new Object[]{recordReader.getRemoteAddressString(), e.getMessage()});
                                 }
-                        } else {
+                            } else {
                                 logger.trace("Ready to read from {}", new Object[]{recordReader.getRemoteAddressString()});
                                 try {
                                     pipe(recordReader, key);
@@ -164,6 +176,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                 byte[] b = new byte[r];
                 buffer.get(b);
                 channelRecordReader.receiverOutputStream().write(b);
+                channelRecordReader.resetReceiveTS();
                 buffer.clear();
                 logger.trace("Piped {} bytes", r); // , receiver is {} Idle",r, channelRecordReader.isIdle() ? "" : "not");
             }
@@ -187,7 +200,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         } while (r>0);
     }
 
-    private synchronized void register(Selector selector, ServerSocketChannel serverSocketChannel){
+    private synchronized void register(Selector selector, ServerSocketChannel serverSocketChannel) {
         try {
             final SocketChannel socketChannel = serverSocketChannel.accept();
             // if this channel is in non-blocking mode then this method will immediately return null if there are no pending connections.
@@ -200,7 +213,7 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
             socketChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
 
-            socketChannel.socket().setSoTimeout(socketReadTimeout);
+            // socketChannel.socket().setSoTimeout(reacordReaderTimeout);
             socketChannel.socket().setReceiveBufferSize(receiveBufferSize);
 
 
@@ -209,9 +222,19 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                 logger.trace("Accepted connection from {}", new Object[]{remoteAddress});
             }
 
+
+            socketChannel.register(selector, SelectionKey.OP_READ);
+        } catch (Exception e) {
+            logger.error("Error dispatching connection: " + e.getMessage(), e);
+        }
+    }
+    private BufferedChannelRecordReader bindReader(SocketChannel socketChannel){
             // create a StandardSocketChannelRecordReader or an SSLSocketChannelRecordReader based on presence of SSLContext
+        try{
             final BufferedChannelRecordReader socketChannelRecordReader;
-            if (sslContext == null) {
+                final SocketAddress remoteSocketAddress = socketChannel.getRemoteAddress();
+
+                if (sslContext == null) {
                 socketChannelRecordReader = new StandardBufferChannelRecordReader(socketChannel, readerFactory, this, remoteSocketAddress.toString(), receiveBufferSize); // #TODO: place batch Size here, not ReceiveBuffer
             } else {
 
@@ -237,7 +260,6 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
 
 
             }
-            socketChannel.register(selector, SelectionKey.OP_READ,socketChannelRecordReader);
 
             // queue the SocketChannelRecordReader for processing by the processor
             recordReaders.offer(socketChannelRecordReader);
@@ -246,14 +268,30 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
             } else {
                 logger.warn("Accepted connection, but No remote socket address provided. No Keepalive responses possible");
             }
-
+            return socketChannelRecordReader;
         } catch (Exception e) {
-            logger.error("Error dispatching connection: " + e.getMessage(), e);
+            logger.error("Error binding reader to connection: " + e.getMessage(), e);
         }
+        return null;
     }
 
     public int getPort() {
         return serverSocketChannel == null ? 0 : serverSocketChannel.socket().getLocalPort();
+    }
+
+    private void removeStaleBuffers(){
+        Set<SelectionKey> allKeys = selector.keys();
+        allKeys.removeAll(selector.selectedKeys());
+        allKeys.stream().filter(key -> {
+            BufferedChannelRecordReader bcrr = (BufferedChannelRecordReader)key.attachment();
+            return (bcrr != null && bcrr.getReceiveAge() > this.recordReaderTimeout
+                && bcrr.isIdle()
+            );
+        }).forEach(key -> {
+            BufferedChannelRecordReader bcrr = (BufferedChannelRecordReader)key.attachment();
+            key.attach(null); // will not be filled again. Re-entring packets will trigger creation of a new buffer
+            bcrr.requestClose(); // will be removed from reader pool upon next polling circle in ListenTCPRecordWrite
+        });
     }
 
     @Override
