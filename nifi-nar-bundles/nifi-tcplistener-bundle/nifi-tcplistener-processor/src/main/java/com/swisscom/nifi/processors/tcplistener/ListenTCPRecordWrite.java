@@ -111,7 +111,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
     static final PropertyDescriptor READ_TIMEOUT = new PropertyDescriptor.Builder()
             .name("read-timeout")
             .displayName("Read Timeout")
-            .description("The amount of time to wait before timing out when reading from a connection.")
+            .description("The amount of time to wait before timing out and start cleaning buffers when reading from a connection.")
             .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
             .defaultValue("120 seconds")
             .required(true)
@@ -125,17 +125,6 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
                     "the data can be read, and incoming data will be dropped.")
             .addValidator(StandardValidators.DATA_SIZE_VALIDATOR)
             .defaultValue("1 MB")
-            .required(true)
-            .build();
-
-    static final PropertyDescriptor MAX_CONNECTIONS = new PropertyDescriptor.Builder()
-            .name("max-number-tcp-connections")
-            .displayName("Max Number of TCP Connections")
-            .description("The maximum number of concurrent TCP connections to accept. In cases where clients are keeping a connection open, " +
-                    "the concurrent tasks for the processor should be adjusted to match the Max Number of TCP Connections allowed, so that there " +
-                    "is a task processing each connection.")
-            .addValidator(StandardValidators.createLongValidator(1, 65535, true))
-            .defaultValue("2")
             .required(true)
             .build();
 
@@ -210,7 +199,6 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         props.add(ListenerProperties.NETWORK_INTF_NAME);
         props.add(PORT);
         props.add(MAX_SOCKET_BUFFER_SIZE);
-        props.add(MAX_CONNECTIONS);
         props.add(READ_TIMEOUT);
         props.add(RECORD_READER);
         props.add(RECORD_WRITER);
@@ -270,7 +258,6 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
 
         final int readTimeout = context.getProperty(READ_TIMEOUT).asTimePeriod(TimeUnit.MILLISECONDS).intValue();
         final int maxSocketBufferSize = context.getProperty(MAX_SOCKET_BUFFER_SIZE).asDataSize(DataUnit.B).intValue();
-        final int maxConnections = context.getProperty(MAX_CONNECTIONS).asInteger();
         final RecordReaderFactory recordReaderFactory = context.getProperty(RECORD_READER).asControllerService(RecordReaderFactory.class);
 
         // if the Network Interface Property wasn't provided then a null InetAddress will indicate to bind to all interfaces
@@ -300,7 +287,7 @@ public class ListenTCPRecordWrite extends AbstractProcessor {
         serverSocketChannel.bind(new InetSocketAddress(nicAddress, port));
 
         this.dispatcher = new SocketChannelRecordReaderDispatcher(serverSocketChannel, sslContext, clientAuth, readTimeout,
-                maxSocketBufferSize, maxConnections, recordReaderFactory, socketReaders, ackWriters, getLogger());
+                maxSocketBufferSize, recordReaderFactory, socketReaders, ackWriters, getLogger());
 
         // start a thread to run the dispatcher
         final Thread readerThread = new Thread(dispatcher);

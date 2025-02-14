@@ -45,7 +45,6 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
     private final ClientAuth clientAuth;
     private final int recordReaderTimeout;
     private final int receiveBufferSize;
-    private final int maxConnections;
     private final RecordReaderFactory readerFactory;
     private final BlockingQueue<BufferedChannelRecordReader> recordReaders;
     private final ComponentLog logger;
@@ -60,7 +59,6 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
                                                final ClientAuth clientAuth,
                                                final int socketReadTimeout,
                                                final int receiveBufferSize,
-                                               final int maxConnections,
                                                final RecordReaderFactory readerFactory,
                                                final BlockingQueue<BufferedChannelRecordReader> recordReaders,
                                                final Map<String,SocketChannelAckWriter> ackWriters,
@@ -71,7 +69,6 @@ public class SocketChannelRecordReaderDispatcher implements Runnable, Closeable 
         this.clientAuth = clientAuth;
         this.recordReaderTimeout = socketReadTimeout;
         this.receiveBufferSize = receiveBufferSize;
-        this.maxConnections = maxConnections;
         this.readerFactory = readerFactory;
         this.recordReaders = recordReaders;
         this.logger = logger;
