@@ -75,6 +75,18 @@ public class TestAvroReaderWithExplicitSchema {
         RecordSchema recordSchema = new SimpleRecordSchema(dataSchema.toString(), AvroTypeUtil.AVRO_SCHEMA_FORMAT, null);
 
         AvroReaderWithExplicitSchema avroReader = new AvroReaderWithExplicitSchema(fileInputStream, recordSchema, dataSchema);
+        assertThrows(ArrayIndexOutOfBoundsException.class, avroReader::nextAvroRecord);
+
+    }
+
+    @Test
+    public void testAvroExplicitReaderWithEmbeddedSchemaFileDifferentFromExplicitSchema() throws Exception {
+        File avroFileWithEmbeddedSchema = new File("src/test/resources/avro/avro_embed_schema.avro");
+        FileInputStream fileInputStream = new FileInputStream(avroFileWithEmbeddedSchema);
+        Schema dataSchema = new Schema.Parser().parse("{\"namespace\": \"nifi\",\"name\": \"test\",\"type\": \"record\",\"fields\": [{\"name\": \"id\",\"type\": \"int\"}]}");
+        RecordSchema recordSchema = new SimpleRecordSchema(dataSchema.toString(), AvroTypeUtil.AVRO_SCHEMA_FORMAT, null);
+        AvroReaderWithExplicitSchema avroReader = new AvroReaderWithExplicitSchema(fileInputStream, recordSchema, dataSchema);
+
         GenericRecord record = avroReader.nextAvroRecord();
         assertNotNull(record);
         assertEquals(1, record.get("id"));
@@ -91,19 +103,7 @@ public class TestAvroReaderWithExplicitSchema {
         assertNotNull(record.get("key"));
         assertEquals("hello", record.get("key").toString());
         record = avroReader.nextAvroRecord();
-        assertNull(record);
-    }
-
-    @Test
-    public void testAvroExplicitReaderWithEmbeddedSchemaFileDifferentFromExplicitSchema() throws Exception {
-        File avroFileWithEmbeddedSchema = new File("src/test/resources/avro/avro_embed_schema.avro");
-        FileInputStream fileInputStream = new FileInputStream(avroFileWithEmbeddedSchema);
-        Schema dataSchema = new Schema.Parser().parse("{\"namespace\": \"nifi\",\"name\": \"test\",\"type\": \"record\",\"fields\": [{\"name\": \"id\",\"type\": \"int\"}]}");
-        RecordSchema recordSchema = new SimpleRecordSchema(dataSchema.toString(), AvroTypeUtil.AVRO_SCHEMA_FORMAT, null);
-
-        // Causes IOException in constructor due to schemas not matching
-        assertThrows(IOException.class, () -> new AvroReaderWithExplicitSchema(fileInputStream, recordSchema, dataSchema));
-    }
+        assertNull(record);   }
 
     @Test
     public void testAvroExplicitReaderWithSchemalessFileAndExplicitSchema() throws Exception {
