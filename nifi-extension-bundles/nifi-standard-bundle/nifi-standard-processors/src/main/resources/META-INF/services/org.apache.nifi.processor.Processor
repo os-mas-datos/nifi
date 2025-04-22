@@ -65,6 +65,7 @@ org.apache.nifi.processors.standard.ListenFTP
 org.apache.nifi.processors.standard.ListenHTTP
 org.apache.nifi.processors.standard.ListenSyslog
 org.apache.nifi.processors.standard.ListenTCP
+org.apache.nifi.processors.standard.ListenTCPReturn
 org.apache.nifi.processors.standard.ListenUDP
 org.apache.nifi.processors.standard.ListenUDPRecord
 org.apache.nifi.processors.standard.ListFile

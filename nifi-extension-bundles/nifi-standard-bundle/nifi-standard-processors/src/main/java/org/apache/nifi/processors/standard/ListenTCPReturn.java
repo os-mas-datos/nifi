@@ -22,6 +22,7 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.handler.codec.DatagramPacketEncoder;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.bytes.ByteArrayDecoder;
 import io.netty.handler.codec.bytes.ByteArrayEncoder;
 import org.apache.nifi.annotation.behavior.InputRequirement;
@@ -51,6 +52,7 @@ import org.apache.nifi.processor.*;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.processor.util.listen.EventBatcher;
+import org.apache.nifi.processor.util.listen.FlowFileEventBatch;
 import org.apache.nifi.processor.util.listen.ListenerProperties;
 import org.apache.nifi.processor.util.listen.queue.TrackingLinkedBlockingQueue;
 import org.apache.nifi.remote.io.socket.NetworkUtils;
@@ -60,6 +62,7 @@ import org.apache.nifi.ssl.SSLContextProvider;
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.time.Duration;
@@ -241,6 +244,18 @@ public class ListenTCPReturn extends ListenTCP {
         super.onTrigger(context,session);
     }
 
+    @Override
+    protected Map<String, String> getAttributes(FlowFileEventBatch<ByteArrayMessage> batch) {
+        final Map<String, String> attributes = new HashMap<>(4);
+        attributes.putAll(super.getAttributes(batch));
+        if (attributes.getOrDefault("tcp.sender","localhost").contains(":")){
+            attributes.put("remoteaddress", attributes.get("tcp.sender"));
+        } else {
+            getLogger().warn("remote Address %s seems not to contains a port number", attributes.get("tcp.sender"));
+        }
+        return attributes;
+    }
+
     public class ChannelNotFoundException extends IOException{
 
         public ChannelNotFoundException(String msg) {
@@ -274,6 +289,17 @@ public class ListenTCPReturn extends ListenTCP {
         }
 
     }
+    protected class AnnotatePortMessageDecoder extends MessageToMessageDecoder<ByteArrayMessage> {
+        // the original org.apache.nifi.event.transport.netty.codec.SocketByteArrayMessageDecoder forgets to add the port
+        // so that finding the return part from a single message or a batch of messages is impossible
+        @Override
+        protected void decode(ChannelHandlerContext channelHandlerContext, ByteArrayMessage msg, List<Object> out) throws Exception {
+            final InetSocketAddress remoteAddress = (InetSocketAddress) channelHandlerContext.channel().remoteAddress();
+            final String address = String.format("%s:%d",remoteAddress.getHostString(), remoteAddress.getPort());
+            final ByteArrayMessage message = new ByteArrayMessage(msg.getMessage(), address, msg.getSslSessionStatus());
+            out.add(msg);
+        }
+    }
 
     private class TLVMessagesNettyEventServerFactory extends NettyEventServerFactory {
         public TLVMessagesNettyEventServerFactory(final ComponentLog log,
@@ -288,29 +314,35 @@ public class ListenTCPReturn extends ListenTCP {
 
             final ByteArrayMessageChannelHandler byteArrayMessageChannelHandler;
             if (FilteringStrategy.EMPTY == filteringStrategy) {
-                byteArrayMessageChannelHandler = new FilteringByteArrayMessageChannelHandler(messages);
+                byteArrayMessageChannelHandler = new FilteringByteArrayMessageChannelHandler(messages){
+
+                };
             } else {
-                byteArrayMessageChannelHandler = new ByteArrayMessageChannelHandler(messages);
+                byteArrayMessageChannelHandler = new ByteArrayMessageChannelHandler(messages){};
             }
 
-            /* setHandlerSupplier translates then here:
+            /* setHandlerSupplier translates then to here:
                      handlerSupplier.get().forEach(pipeline::addLast);
                into a standard Netty Pipeline.
                See also https://netty.io/4.1/api/io/netty/channel/ChannelPipeline.html
              */
+            // The ChannelPipeline is already pre-populated with e.g. SSLHandler, if needed, in ServerSslHandlerChannelInitializer,
+            // when the initial bootstrap is set up by superclass org.apache.nifi.event.transport.netty.NettyEventServerFactory:218
             if (TransportProtocol.UDP.equals(protocol)) {
                 setHandlerSupplier(() -> Arrays.asList(
                         new DatagramByteArrayMessageDecoder(),new ByteArrayEncoder(),
+                        new AnnotatePortMessageDecoder(),
                         byteArrayMessageChannelHandler,
                         logExceptionChannelHandler
                 ));
             } else {
                 setHandlerSupplier(() -> Arrays.asList(
-                        // Replaced the FrameDecoder in the org.apache.nifi.event.transport.netty.ByteArrayMessageNettyEventServerFactory
-                        // use by original ListenTCP
+                        // Replaces the DelimiterBasedFrameDecoder in the org.apache.nifi.event.transport.netty.ByteArrayMessageNettyEventServerFactory
+                        // used by original ListenTCP
                         new LengthFieldBasedFrameDecoder(65532,0,2,-2,0),
                         new ByteArrayDecoder(),new ByteArrayEncoder(),
                         new SocketByteArrayMessageDecoder(),
+                        new AnnotatePortMessageDecoder(),
                         byteArrayMessageChannelHandler,
                         responseHandler,
                         logExceptionChannelHandler
